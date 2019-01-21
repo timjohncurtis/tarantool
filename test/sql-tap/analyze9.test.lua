@@ -1,8 +1,11 @@
 #!/usr/bin/env tarantool
 test = require("sqltester")
-test:plan(121)
+test:plan(106)
 
 testprefix = "analyze9"
+
+_sql_stat1 = box.space._sql_stat1
+_sql_stat4 = box.space._sql_stat4
 
 --!./tcltestrunner.lua
 -- 2013 August 3
@@ -72,9 +75,9 @@ test:do_execsql_test(
         SELECT "tbl","idx","neq","nlt","ndlt",msgpack_decode_sample("sample") FROM "_sql_stat4" where "idx" = 'I1';
     ]], {
         -- <1.2>
-        "T1", "I1", "1 1", "0 0", "0 0", "(0) (0)", "T1", "I1", "1 1", "1 1", "1 1", "(1) (1)", 
-        "T1", "I1", "1 1", "2 2", "2 2", "(2) (2)", "T1", "I1", "1 1", "3 3", "3 3", "(3) (3)", 
-        "T1", "I1", "1 1", "4 4", "4 4", "(4) (4)"
+        "T1","I1",1,1,0,0,0,0,"(0) (0)","T1","I1",1,1,1,1,1,1,"(1) (1)",
+        "T1","I1",1,1,2,2,2,2,"(2) (2)","T1","I1",1,1,3,3,3,3,"(3) (3)",
+        "T1","I1",1,1,4,4,4,4,"(4) (4)"
         -- </1.2>
     })
 
@@ -85,9 +88,9 @@ test:do_execsql_test(
 
     ]], {
         -- <1.3>
-        'T1', 'T1', '1', '0', '0', '(0)', 'T1', 'T1', '1', '1', '1', '(1)', 
-        'T1', 'T1', '1', '2', '2', '(2)', 'T1', 'T1', '1', '3', '3', '(3)', 
-        'T1', 'T1', '1', '4', '4', '(4)'
+        "T1","T1",1,0,0,"(0)","T1","T1",1,1,1,"(1)",
+        "T1","T1",1,2,2,"(2)","T1","T1",1,3,3,"(3)",
+        "T1","T1",1,4,4,"(4)"
         -- </1.3>
     })
 
@@ -184,12 +187,12 @@ test:do_execsql_test(
     ]], generate_tens(100))
 
 -- The first element in the "nEq" list of all samples should therefore be 10.
---      
+      
 test:do_execsql_test(
     "3.3.2",
     [[
         ANALYZE;
-        SELECT lrange("neq", 1, 1) FROM "_sql_stat4" WHERE "idx" = 'I2';
+        SELECT lrange(msgpack_decode_sample("neq"), 1, 1) FROM "_sql_stat4" WHERE "idx" = 'I2';
     ]], generate_tens_str(24))
 
 ---------------------------------------------------------------------------
@@ -283,31 +286,102 @@ test:do_execsql_test(
         -- </4.2>
     })
 
+-- Show tuples in the "_sql_stat4" sorted by field "sample"
+-- where field "idx" is "I1".
+function get_tuples_with_I1_order_by_sample(order, limit)
+    t = {}
+    for k, v in _sql_stat4:pairs() do
+        table.insert(t, v)
+    end
+
+    local count = 1
+    local where = {idx = 'I1'}
+    if where ~= 0 then
+        -- Set all tuples in the t to nil if its field "tbl"
+        -- isn't "T1" and field "idx" isn't "I1".
+        for k, v in pairs(where) do
+            local i = 1
+            for key, tuple in pairs(t) do
+                tuple = t[i]
+                if tuple[k] ~= v then
+                    t[i] = nil
+                else
+                    count = i
+                end
+                i = i + 1
+            end
+        end
+    end
+
+    local order_by = 'sample'
+    local compare = function() end
+    if order == 'asc' then
+        compare = function(a, b)
+            if a[order_by] <= b[order_by] then
+                return true
+            end
+        end
+    else
+        compare = function(a, b)
+            if a[order_by] > b[order_by] then
+                return true
+            end
+        end
+    end
+
+    table.sort(t, compare)
+
+    if limit == nil then
+        limit = count
+    end
+
+    local ret = ''
+    local i = 1
+    msgpack = require('msgpack')
+    while i <= limit do
+        t[i] = t[i]:update({{'=', 6, msgpack_decode_sample(t[i]['sample'])}})
+        t[i] = t[i]:transform(1, 2)
+        if i == 1 then
+            ret = tostring(t[i])
+        else
+            ret = ret..', '..tostring(t[i])
+        end
+        i = i + 1
+    end
+    return ret
+end
+
+box.internal.sql_create_function("get_tuples_with_I1_order_by_sample", "TEXT", get_tuples_with_I1_order_by_sample)
+
+local function res_4_3()
+    local res = ''
+    for i = 0, 15 do
+        res = res..'[[10, 10, 10], ['..(i * 10)..', '..
+        (i * 10)..', '..(i * 10)..'], ['..i..', '..i..', '..i..'], \''..i..' '..
+        i..' '..i..'\'], '
+    end
+    res = string.sub(res, 0, -3)
+    return res
+end
+
 test:do_execsql_test(
     4.3,
     [[
-        SELECT "neq", lrange("nlt", 1, 3), lrange("ndlt", 1, 3), lrange(msgpack_decode_sample("sample"), 1, 3) 
-            FROM "_sql_stat4" WHERE "idx" = 'I1' ORDER BY "sample" LIMIT 16;
+        SELECT get_tuples_with_I1_order_by_sample('asc', 16);
     ]], {
         -- <4.3>
-        "10 10 10","0 0 0","0 0 0","0 0 0","10 10 10","10 10 10","1 1 1","1 1 1","10 10 10","20 20 20",
-        "2 2 2","2 2 2","10 10 10","30 30 30","3 3 3","3 3 3","10 10 10","40 40 40","4 4 4","4 4 4",
-        "10 10 10","50 50 50","5 5 5","5 5 5","10 10 10","60 60 60","6 6 6","6 6 6","10 10 10","70 70 70",
-        "7 7 7","7 7 7","10 10 10","80 80 80","8 8 8","8 8 8","10 10 10","90 90 90","9 9 9","9 9 9",
-        "10 10 10","100 100 100","10 10 10","10 10 10","10 10 10","110 110 110","11 11 11","11 11 11",
-        "10 10 10","120 120 120","12 12 12","12 12 12","10 10 10","130 130 130","13 13 13","13 13 13",
-        "10 10 10","140 140 140","14 14 14","14 14 14","10 10 10","150 150 150","15 15 15","15 15 15"
+        res_4_3()
         -- </4.3>
     })
 
 test:do_execsql_test(
     4.4,
     [[
-        SELECT "neq", lrange("nlt", 1, 3), lrange("ndlt", 1, 3), lrange(msgpack_decode_sample("sample"), 1, 3) 
-        FROM "_sql_stat4" WHERE "idx" = 'I1' ORDER BY "sample" DESC LIMIT 2;
+        SELECT get_tuples_with_I1_order_by_sample('desc', 2);
     ]], {
         -- <4.4>
-        "2 1 1","295 296 296","120 122 125","201 4 h","5 3 1","290 290 291","119 119 120","200 1 b"
+        "[[2, 1, 1], [295, 296, 296], [120, 122, 125], '201 4 h'], "..
+        "[[5, 3, 1], [290, 290, 291], [119, 119, 120], '200 1 b']"
         -- </4.4>
     })
 
@@ -373,128 +447,6 @@ test:do_execsql_test(
         "x", "1110", "2230", "2750", "3350", "4090", "4470", "4980", "5240", "5280", "5290", "5590", "5920",
         "5930", "6220", "6710", "7000", "7710", "7830", "7970", "8890", "8950", "9240", "9250", "9680"
         -- </4.9>
-    })
-
----------------------------------------------------------------------------
--- This was also crashing (corrupt sql_stat4 table).
-
-test:do_execsql_test(
-    6.1,
-    [[
-        DROP TABLE IF EXISTS t1;
-        CREATE TABLE t1(id INTEGER PRIMARY KEY AUTOINCREMENT, a TEXT , b INT );
-        CREATE INDEX i1 ON t1(a);
-        CREATE INDEX i2 ON t1(b);
-        INSERT INTO t1 VALUES(null, 1, 1);
-        INSERT INTO t1 VALUES(null, 2, 2);
-        INSERT INTO t1 VALUES(null, 3, 3);
-        INSERT INTO t1 VALUES(null, 4, 4);
-        INSERT INTO t1 VALUES(null, 5, 5);
-        ANALYZE;
-        CREATE TABLE x1(tbl TEXT, idx TEXT , neq TEXT, nlt TEXT, ndlt TEXT, sample BLOB, PRIMARY KEY(tbl, idx, sample));
-        INSERT INTO x1 SELECT * FROM "_sql_stat4";
-        DELETE FROM "_sql_stat4";
-        INSERT INTO "_sql_stat4" SELECT * FROM x1;
-        ANALYZE;
-    ]])
-
-test:do_execsql_test(
-    6.2,
-    [[
-        SELECT * FROM t1 WHERE a = 'abc';
-    ]])
-
----------------------------------------------------------------------------
--- The following tests experiment with adding corrupted records to the
--- 'sample' column of the _sql_stat4 table.
---
-local get_pk = function (space, record)
-    local pkey = {}
-    for _, part in pairs(space.index[0].parts) do
-        table.insert(pkey, record[part.fieldno])
-    end
-    return pkey
-end
-
-local inject_stat_error_func = function (space_name)
-    local space = box.space[space_name]
-    local record = space:select({"T1", "I1", nil}, {limit = 1})[1]
-    space:delete(get_pk(space, record))
-    local record_new = {}
-    for i = 1,#record-1 do record_new[i] = record[i] end
-    record_new[#record] = ''
-    space:insert(record_new)
-    return 0
-end
-
-box.internal.sql_create_function("inject_stat_error", "INT", inject_stat_error_func)
-
-test:do_execsql_test(
-    7.1,
-    [[
-        DROP TABLE IF EXISTS t1;
-        CREATE TABLE t1(id INTEGER PRIMARY KEY AUTOINCREMENT, a INT , b INT );
-        CREATE INDEX i1 ON t1(a, b);
-        INSERT INTO t1 VALUES(null, 1, 1);
-        INSERT INTO t1 VALUES(null, 2, 2);
-        INSERT INTO t1 VALUES(null, 3, 3);
-        INSERT INTO t1 VALUES(null, 4, 4);
-        INSERT INTO t1 VALUES(null, 5, 5);
-        ANALYZE;
-        SELECT inject_stat_error('_sql_stat4');
-        ANALYZE;
-    ]])
-
--- Doesn't work due to the fact that in Tarantool rowid has been removed,
--- and tbl, idx and sample have been united into primary key.
--- test:do_execsql_test(
---    7.2,
---    [[
---        UPDATE _sql_stat4 SET sample = X'FFFF';
---        ANALYZE;
---        SELECT * FROM t1 WHERE a = 1;
---    ]], {
---        -- <7.2>
---        1, 1
---        -- </7.2>
---    })
-
-test:do_execsql_test(
-    7.3,
-    [[
-        UPDATE "_sql_stat4" SET "neq" = '0 0 0';
-        ANALYZE;
-        SELECT * FROM t1 WHERE a = 1;
-    ]], {
-        -- <7.3>
-        1, 1, 1
-        -- </7.3>
-    })
-
-test:do_execsql_test(
-    7.4,
-    [[
-        ANALYZE;
-        UPDATE "_sql_stat4" SET "ndlt" = '0 0 0';
-        ANALYZE;
-        SELECT * FROM t1 WHERE a = 3;
-    ]], {
-        -- <7.4>
-        3, 3, 3
-        -- </7.4>
-    })
-
-test:do_execsql_test(
-    7.5,
-    [[
-        ANALYZE;
-        UPDATE "_sql_stat4" SET "nlt" = '0 0 0';
-        ANALYZE;
-        SELECT * FROM t1 WHERE a = 5;
-    ]], {
-        -- <7.5>
-        5, 5, 5
-        -- </7.5>
     })
 
 ---------------------------------------------------------------------------
@@ -1030,119 +982,6 @@ test:do_execsql_test(
         -- </13.2.2>
     })
 
----------------------------------------------------------------------------
--- Test that nothing untoward happens if the stat4 table contains entries
--- for indexes that do not exist.
--- Or NULL values in any of the other columns except for PK.
---
-test:do_execsql_test(
-    15.1,
-    [[
-        DROP TABLE IF EXISTS x1;
-        CREATE TABLE x1(a  INT PRIMARY KEY, b INT , UNIQUE(a, b));
-        INSERT INTO x1 VALUES(1, 2);
-        INSERT INTO x1 VALUES(3, 4);
-        INSERT INTO x1 VALUES(5, 6);
-        ANALYZE;
-        INSERT INTO "_sql_stat4" VALUES('x1', 'abc', '', '', '', '');
-    ]])
-
-test:do_execsql_test(
-    15.2,
-    [[
-        SELECT * FROM x1; 
-    ]], {
-        -- <15.2>
-        1, 2, 3, 4, 5, 6
-        -- </15.2>
-    })
-
-test:do_execsql_test(
-    15.3,
-    [[
-        INSERT INTO "_sql_stat4" VALUES('42', '42', '42', '42', '42', '42');
-    ]])
-
-test:do_execsql_test(
-    15.4,
-    [[
-        SELECT * FROM x1;
-    ]], {
-        -- <15.4>
-        1, 2, 3, 4, 5, 6
-        -- </15.4>
-    })
-
-local inject_stat_error_func = function (space_name)
-    local space = box.space[space_name]
-    local stats = space:select()
-    for _, stat in pairs(stats) do
-        space:delete(get_pk(space, stat))
-        local new_tuple = {"no such tbl"}
-        for i=2,#stat do
-            table.insert(new_tuple, stat[i])
-        end
-        space:insert(new_tuple)
-    end
-    return 0
-end
-
-box.internal.sql_create_function("inject_stat_error", "INT", inject_stat_error_func)
-
-
-test:do_execsql_test(
-    15.7,
-    [[
-        ANALYZE;
-        SELECT inject_stat_error('_sql_stat1');
-    ]])
-
-test:do_execsql_test(
-    15.8,
-    [[
-        SELECT * FROM x1 ;
-    ]], {
-        -- <15.8>
-        1, 2, 3, 4, 5, 6
-        -- </15.8>
-    })
-
--- Tarantool: this test seems to be useless. There's no reason
--- for these fields to be nullable.
--- test:do_execsql_test(
---    15.9,
---    [[
---        ANALYZE;
---        UPDATE "_sql_stat4" SET "neq" = NULL, "nlt" = NULL, "ndlt" = NULL;
---    ]])
-
-test:do_execsql_test(
-    15.10,
-    [[
-        SELECT * FROM x1;
-    ]], {
-        -- <15.10>
-        1, 2, 3, 4, 5, 6
-        -- </15.10>
-    })
-
--- This is just for coverage....
-test:do_execsql_test(
-    15.11,
-    [[
-        ANALYZE;
-        UPDATE "_sql_stat1" SET "stat" = "stat" || ' unordered';
-    ]])
-
-test:do_execsql_test(
-    15.12,
-    [[
-        SELECT * FROM x1;
-    ]], {
-        -- <15.12>
-        1, 2, 3, 4, 5, 6
-        -- </15.12>
-    })
 ---------------------------------------------------------------------------
 -- Test that stat4 data may be used with partial indexes.
 --
