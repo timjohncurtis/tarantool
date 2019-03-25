@@ -47,7 +47,6 @@ jobs:
         if: branch = "master"
       - name: Create and deploy tarball
         env: TARGET=source
-        if: branch = "master"
       - name: CentOS 6 build + test + deploy RPM
         env: OS=el DIST=6
         if: branch = "master"
