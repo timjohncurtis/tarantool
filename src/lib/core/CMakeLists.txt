@@ -27,7 +27,15 @@ set(core_sources
     mpstream.c
     port.c
     decimal.c
+    coio_popen.c
 )
+
+# Disable gcc compiler error
+if (CMAKE_COMPILER_IS_GNUCC)
+    set_source_files_properties(coio_popen.c PROPERTIES COMPILE_FLAGS
+            -Wno-clobbered)
+endif()
+
 
 if (TARGET_OS_NETBSD)
     # A workaround for "undefined reference to `__gcc_personality_v0'"

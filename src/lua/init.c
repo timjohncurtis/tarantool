@@ -56,6 +56,7 @@
 #include "lua/msgpack.h"
 #include "lua/pickle.h"
 #include "lua/fio.h"
+#include "lua/lua_signal.h"
 #include "lua/httpc.h"
 #include "lua/utf8.h"
 #include "lua/swim.h"
@@ -449,6 +450,7 @@ tarantool_lua_init(const char *tarantool_bin, int argc, char **argv)
 	tarantool_lua_fiber_channel_init(L);
 	tarantool_lua_errno_init(L);
 	tarantool_lua_error_init(L);
+	tarantool_lua_signal_init(L);
 	tarantool_lua_fio_init(L);
 	tarantool_lua_socket_init(L);
 	tarantool_lua_pickle_init(L);

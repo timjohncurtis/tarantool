@@ -46,6 +46,9 @@
 
 #include "lua/utils.h"
 #include "coio_file.h"
+#include "coio_popen.h"
+
+static uint32_t CTID_STRUCT_POPEN_HANDLE_REF = 0;
 
 static inline void
 lbox_fio_pushsyserror(struct lua_State *L)
@@ -703,6 +706,269 @@ lbox_fio_copyfile(struct lua_State *L)
 	return lbox_fio_pushbool(L, coio_copyfile(source, dest) == 0);
 }
 
+static bool
+popen_verify_argv(struct lua_State *L)
+{
+	if (!lua_istable(L, 1))
+		return false;
+	int num = (int)lua_objlen(L, 1);  /*luaL_getn(L,1);*/
+	return num >= 1;
+}
+
+static char**
+popen_extract_strarray(struct lua_State *L, int index, int* array_size)
+{
+	if (lua_type(L, index) != LUA_TTABLE) {
+		if (array_size)
+			*array_size = 0;
+		return NULL;
+	}
+
+	size_t num = lua_objlen(L, index);  /*luaL_getn(L,index);*/
+
+	char** array = calloc(num+1, sizeof(char*));
+	/*
+	 * The last item in the array must be NULL
+	 */
+
+	if (array == NULL)
+		return NULL;
+
+	for(size_t i = 0; i < num; ++i) {
+		lua_rawgeti(L, index, i+1);
+		size_t slen = 0;
+		const char* str = lua_tolstring(L, -1, &slen);
+		if (!str)
+			str = "";
+		array[i] = strdup(str);
+		lua_pop(L, 1);
+	}
+
+	if (array_size)
+		*array_size = num;
+	/*
+	 * The number of elements doesn't include
+	 * the trailing NULL pointer
+	 */
+	return array;
+}
+
+static struct popen_handle *
+fio_popen_get_handle(lua_State *L, int idx)
+{
+	uint32_t cdata_type;
+	struct popen_handle **handle_ptr = luaL_checkcdata(L, idx, &cdata_type);
+	if (handle_ptr == NULL || cdata_type != CTID_STRUCT_POPEN_HANDLE_REF)
+		return NULL;
+	return *handle_ptr;
+}
+
+static void
+fio_popen_invalidate_handle(lua_State *L, int idx)
+{
+	uint32_t cdata_type;
+	struct popen_handle **handle_ptr = luaL_checkcdata(L, idx, &cdata_type);
+	if (handle_ptr != NULL && cdata_type == CTID_STRUCT_POPEN_HANDLE_REF) {
+		*handle_ptr = NULL;
+	}
+}
+
+static int
+lbox_fio_popen_gc(lua_State *L)
+{
+	struct popen_handle *handle = fio_popen_get_handle(L,1);
+
+	if (handle)
+		popen_destroy(handle);
+	return 0;
+}
+
+static int
+lbox_fio_popen(struct lua_State *L)
+{
+	if (lua_gettop(L) < 1) {
+		usage:
+		luaL_error(L, "fio.popen: Invalid arguments");
+	}
+
+	if (!popen_verify_argv(L))
+		goto usage;
+
+	int stdin_fd = FIO_PIPE;
+	int stdout_fd = FIO_PIPE;
+	int stderr_fd = FIO_PIPE;
+
+	char** argv = popen_extract_strarray(L, 1, NULL);
+	char** env = popen_extract_strarray(L, 2, NULL);
+
+	if (lua_isnumber(L, 3))
+		stdin_fd = lua_tonumber(L, 3);
+	if (lua_isnumber(L, 4))
+		stdout_fd = lua_tonumber(L, 4);
+	if (lua_isnumber(L, 5))
+		stderr_fd = lua_tonumber(L, 5);
+
+	struct popen_handle* handle = NULL;
+	if (coio_call(popen_new, argv, env, stdin_fd, stdout_fd,
+		      stderr_fd, &handle) < 0) {
+		lua_pushnil(L);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	} else {
+		luaL_pushcdata(L, CTID_STRUCT_POPEN_HANDLE_REF);
+		*(struct popen_handle **)
+			luaL_pushcdata(L, CTID_STRUCT_POPEN_HANDLE_REF) = handle;
+		lua_pushcfunction(L, lbox_fio_popen_gc);
+		luaL_setcdatagc(L, -2);
+
+		return 1;
+	}
+}
+
+static int
+lbox_fio_popen_read(struct lua_State *L)
+{
+	/* popen_read(self.fh, buf, size, seconds) */
+
+	void* fh = fio_popen_get_handle(L, 1);
+	uint32_t ctypeid;
+	char *buf = *(char **)luaL_checkcdata(L, 2, &ctypeid);
+	size_t len = lua_tonumber(L, 3);
+	ev_tstamp seconds = lua_tonumber(L, 4);
+
+	if (!len) {
+		lua_pushinteger(L, 0);
+		lua_pushinteger(L, STDOUT_FILENO);
+		return 2;
+	}
+
+	int output_number = 0;
+	size_t received = 0;
+	int rc = popen_read(fh, buf, len,
+			    &received, &output_number,
+			    seconds);
+	if (rc == 0) {                /* The reading's succeeded */
+		lua_pushinteger(L, received);
+		lua_pushinteger(L, output_number);
+		return 2;
+	} else {
+		lua_pushnil(L);
+		lua_pushnil(L);
+		lbox_fio_pushsyserror(L);
+		return 3;
+	}
+}
+
+static int
+lbox_fio_popen_write(struct lua_State *L)
+{
+	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	const char *buf = lua_tostring(L, 2);
+	uint32_t ctypeid = 0;
+	if (buf == NULL)
+		buf = *(const char **)luaL_checkcdata(L, 2, &ctypeid);
+	size_t len = lua_tointeger(L, 3);
+	double timeout = lua_tonumber(L, 4);
+
+	size_t written = 0;
+	int rc = popen_write(fh, buf, len,
+			     &written, timeout);
+	if (rc == 0 && written == len) {
+		/* The writing's succeeded */
+		lua_pushinteger(L, (ssize_t) written);
+		return 1;
+	} else {
+		lua_pushnil(L);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	}
+}
+
+static int
+lbox_fio_popen_get_status(struct lua_State *L)
+{
+	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	int exit_code = 0;
+	int res = popen_get_status(fh, &exit_code);
+
+	switch (res) {
+		case POPEN_RUNNING:
+			lua_pushnil(L);
+			break;
+
+		case POPEN_KILLED:
+			lua_pushinteger(L, -exit_code);
+			break;
+
+		default:
+			lua_pushinteger(L, exit_code);
+			break;
+	}
+
+	return 1;
+}
+
+static int
+lbox_fio_popen_get_std_file_handle(struct lua_State *L)
+{
+	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	int file_no = lua_tonumber(L, 2);
+	int res = popen_get_std_file_handle(fh, file_no);
+
+	if (res < 0)
+		lua_pushnil(L);
+	else
+		lua_pushinteger(L, res);
+	return 1;
+}
+
+static int
+lbox_fio_popen_kill(struct lua_State *L)
+{
+	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	int signal_id = lua_tonumber(L, 2);
+
+	int res = popen_kill(fh, signal_id);
+	if (res < 0){
+		lua_pushboolean(L, false);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	} else {
+		lua_pushboolean(L, true);
+		return 1;
+	}
+}
+
+static int
+lbox_fio_popen_wait(struct lua_State *L)
+{
+	struct popen_handle *fh = fio_popen_get_handle(L, 1);
+	assert(fh);
+	ev_tstamp timeout = lua_tonumber(L, 2);
+
+	/*
+	 * On success function returns an
+	 * exit code as a positive number
+	 * or signal id as a negative number.
+	 * If failed, rc is nul and err
+	 * contains a error message.
+	 */
+
+	int exit_code =0;
+	int res = popen_wait(fh, timeout, &exit_code);
+	if (res < 0){
+		lua_pushnil(L);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	} else {
+		/* Release the allocated resources */
+		popen_destroy(fh);
+		fio_popen_invalidate_handle(L, 1);
+
+		lua_pushinteger(L, exit_code);
+		return 1;
+	}
+}
 
 
 void
@@ -747,6 +1013,13 @@ tarantool_lua_fio_init(struct lua_State *L)
 		{ "listdir",		lbox_fio_listdir		},
 		{ "fstat",		lbox_fio_fstat			},
 		{ "copyfile",		lbox_fio_copyfile,		},
+		{ "popen",		lbox_fio_popen			},
+		{ "popen_read",		lbox_fio_popen_read 		},
+		{ "popen_write",	lbox_fio_popen_write 		},
+		{ "popen_get_status",	lbox_fio_popen_get_status	},
+		{ "popen_get_std_file_handle",	lbox_fio_popen_get_std_file_handle },
+		{ "popen_kill",		lbox_fio_popen_kill 		},
+		{ "popen_wait",		lbox_fio_popen_wait 		},
 		{ NULL,			NULL				}
 	};
 	luaL_register(L, NULL, internal_methods);
@@ -849,4 +1122,12 @@ tarantool_lua_fio_init(struct lua_State *L)
 
 	lua_settable(L, -3);
 	lua_pop(L, 1);
+
+	/* Get CTypeID for `struct tuple' */
+	int rc = luaL_cdef(L, "struct popen_handle;");
+	assert(rc == 0);
+	(void) rc;
+	CTID_STRUCT_POPEN_HANDLE_REF = luaL_ctypeid(L, "struct popen_handle &");
+	assert(CTID_STRUCT_POPEN_HANDLE_REF != 0);
+
 }

@@ -40,6 +40,7 @@
 
 #include "fiber.h"
 #include "third_party/tarantool_ev.h"
+#include "coio_popen.h"
 
 /*
  * Asynchronous IO Tasks (libeio wrapper).
@@ -129,6 +130,7 @@ coio_on_stop(void *data)
 void
 coio_init(void)
 {
+	popen_initialize();
 	eio_set_thread_on_start(coio_on_start, NULL);
 	eio_set_thread_on_stop(coio_on_stop, NULL);
 }

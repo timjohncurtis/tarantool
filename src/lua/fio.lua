@@ -3,6 +3,8 @@
 local fio = require('fio')
 local ffi = require('ffi')
 local buffer = require('buffer')
+local signal = require('signal')
+local errno = require('errno')
 
 ffi.cdef[[
     int umask(int mask);
@@ -14,6 +16,13 @@ local const_char_ptr_t = ffi.typeof('const char *')
 
 local internal = fio.internal
 fio.internal = nil
+
+fio.STDIN = 0
+fio.STDOUT = 1
+fio.STDERR = 2
+fio.PIPE = -2
+fio.DEVNULL = -3
+
 
 local function sprintf(fmt, ...)
     if select('#', ...) == 0 then
@@ -204,6 +213,216 @@ fio.open = function(path, flags, mode)
     fh = { fh = fh }
     setmetatable(fh, fio_mt)
     return fh
+end
+
+local popen_methods = {}
+
+-- read stdout & stderr of the process started by fio.popen
+-- Usage:
+-- read(size) -> str, source, err
+-- read(buf, size) -> length, source, err
+-- read(size, timeout) -> str, source, err
+-- read(buf, size, timeout) -> length, source, err
+--
+-- timeout - number of seconds to wait (optional)
+-- source contains id of the stream, fio.STDOUT or fio.STDERR
+-- err - error message if method has failed or nil on success
+popen_methods.read = function(self, buf, size, timeout)
+    if self.fh == nil then
+        return nil, nil, 'Invalid object'
+    end
+
+    local tmpbuf
+
+    if ffi.istype(const_char_ptr_t, buf) then
+        -- ext. buffer is specified
+        if type(size) ~= 'number' then
+            error('fio.popen.read: invalid size argument')
+        end
+        timeout = timeout or -1
+    elseif type(buf) == 'number' then
+        -- use temp. buffer
+        timeout = size or -1
+        size = buf
+
+        tmpbuf = buffer.ibuf()
+        buf = tmpbuf:reserve(size)
+    else
+        error("fio.popen.read: invalid arguments")
+    end
+
+    local res, output_no, err = internal.popen_read(self.fh, buf, size, timeout)
+    if res == nil then
+        if tmpbuf ~= nil then
+            tmpbuf:recycle()
+        end
+        return nil, nil, err
+    end
+
+    if tmpbuf ~= nil then
+        tmpbuf:alloc(res)
+        res = ffi.string(tmpbuf.rpos, tmpbuf:size())
+        tmpbuf:recycle()
+    end
+    return res, output_no
+end
+
+-- write(str)
+-- write(buf, len)
+popen_methods.write = function(self, data, size)
+    local timeout = -1.0
+    if type(data) == 'table' then
+        timeout = data.timeout or timeout
+        size = data.size or size
+        data = data.buf
+    end
+
+    if type(data) == 'string' then
+        if size == nil then
+            size = string.len(data)
+        end
+    elseif not ffi.istype(const_char_ptr_t, data) then
+        data = tostring(data)
+        size = #data
+    end
+
+    local res, err = internal.popen_write(self.fh, data, tonumber(size), tonumber(timeout))
+    if err ~= nil then
+        return false, err
+    end
+    return res >= 0
+end
+
+popen_methods.status = function(self)
+    if self.fh ~= nil then
+        return internal.popen_get_status(self.fh)
+    else
+        return self.exit_code
+    end
+end
+
+popen_methods.stdin = function (self)
+    if self.fh == nil then
+        return nil, 'Invalid object'
+    end
+
+    return internal.popen_get_std_file_handle(self.fh, fio.STDIN)
+end
+
+popen_methods.stdout = function (self)
+    if self.fh == nil then
+        return nil, 'Invalid object'
+    end
+
+    return internal.popen_get_std_file_handle(self.fh, fio.STDOUT)
+end
+
+popen_methods.stderr = function (self)
+    if self.fh == nil then
+        return nil, 'Invalid object'
+    end
+
+    return internal.popen_get_std_file_handle(self.fh, fio.STDERR)
+end
+
+popen_methods.kill = function(self, sig)
+    if self.fh == nil then
+        return false, errno.strerror(errno.ESRCH)
+    end
+
+    if sig == nil then
+        sig = 'SIGTERM'
+    end
+    if type(sig) == 'string' then
+        sig = signal.c.signals[sig]
+        if sig == nil then
+            errno(errno.EINVAL)
+            return false, sprintf("fio.popen.kill(): unknown signal: %s", sig)
+        end
+    else
+        sig = tonumber(sig)
+    end
+
+    return internal.popen_kill(self.fh, sig)
+end
+
+popen_methods.wait = function(self, timeout)
+    if self.fh == nil then
+        return false, 'Invalid object'
+    end
+
+    if timeout == nil then
+        timeout = -1
+    else
+        timeout = tonumber(timeout)
+    end
+
+    local rc, err = internal.popen_wait(self.fh, timeout)
+    if rc ~= nil then
+        self.exit_code = tonumber(rc)
+        self.fh = nil
+        return true
+    else
+        return false,err
+    end
+end
+
+
+local popen_mt = { __index = popen_methods }
+
+fio.popen = function(params)
+    local argv = params.argv
+    local env = params.environment
+    local hstdin = params.stdin
+    local hstdout = params.stdout
+    local hstderr = params.stderr
+
+    if type(hstdin) == 'table' then
+        hstdin = hstdin.fh
+    end
+    if type(hstdout) == 'table' then
+        hstdout = hstdout.fh
+    end
+    if type(hstderr) == 'table' then
+        hstderr = hstderr.fh
+    end
+
+    if argv == nil or
+       type(argv) ~= 'table' or
+       table.getn(argv) < 1 then
+        local errmsg = [[Usage: fio.popen({parameters}),
+parameters - a table containing arguments to run a process.
+The following arguments are expected:
+
+argv - [mandatory] is a table of argument strings passed
+       to the new program.
+       By convention, the first of these strings should
+       contain the filename associated with the file
+       being executed.
+
+environment - [optional] is a table of strings,
+              conventionally of the form key=value,
+              which are passed as environment to the
+              new program.
+
+stdin  - [optional] overrides the child process's
+         standard input.
+stdout - [optional] overrides the child process's
+         standard output.
+stderr - [optional] overrides the child process's
+         standard error output.
+]]
+        error(errmsg)
+    end
+
+    local fh,err = internal.popen(argv, env, hstdin, hstdout, hstderr)
+    if err ~= nil then
+        return nil, err
+    end
+
+    local pobj = {fh = fh}
+    setmetatable(pobj, popen_mt)
+    return pobj
 end
 
 fio.pathjoin = function(...)

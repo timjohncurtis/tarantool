@@ -77,6 +77,7 @@
 #include "box/session.h"
 #include "systemd.h"
 #include "crypto/crypto.h"
+#include "coio_popen.h"
 
 static pid_t master_pid = getpid();
 static struct pidfh *pid_file_handle;
@@ -306,6 +307,8 @@ signal_free(void)
 	int i;
 	for (i = 0; i < ev_sig_count; i++)
 		ev_signal_stop(loop(), &ev_sigs[i]);
+
+	popen_reset_sigchld_handler();
 }
 
 /** Make sure the child has a default signal disposition. */
@@ -328,7 +331,8 @@ signal_reset()
 	    sigaction(SIGHUP, &sa, NULL) == -1 ||
 	    sigaction(SIGWINCH, &sa, NULL) == -1 ||
 	    sigaction(SIGSEGV, &sa, NULL) == -1 ||
-	    sigaction(SIGFPE, &sa, NULL) == -1)
+	    sigaction(SIGFPE, &sa, NULL) == -1 ||
+	    sigaction(SIGCHLD, &sa, NULL) == -1)
 		say_syserror("sigaction");
 
 	/* Unblock any signals blocked by libev. */
@@ -372,6 +376,8 @@ signal_init(void)
 	    sigaction(SIGFPE, &sa, 0) == -1) {
 		panic_syserror("sigaction");
 	}
+
+	popen_setup_sigchld_handler();
 
 	ev_signal_init(&ev_sigs[0], sig_checkpoint, SIGUSR1);
 	ev_signal_init(&ev_sigs[1], signal_cb, SIGINT);
