@@ -22,6 +22,7 @@ fio.STDOUT = 1
 fio.STDERR = 2
 fio.PIPE = -2
 fio.DEVNULL = -3
+fio.TIMEOUT_INFINITY = 500 * 365 * 86400
 
 
 local function sprintf(fmt, ...)
@@ -232,6 +233,12 @@ popen_methods.read = function(self, buf, size, timeout)
         return nil, nil, 'Invalid object'
     end
 
+    if type(buf) == 'table' then
+        timeout = buf.timeout or timeout
+        size = buf.size or size
+        buf = buf.buf
+    end
+
     local tmpbuf
 
     if ffi.istype(const_char_ptr_t, buf) then
@@ -239,12 +246,15 @@ popen_methods.read = function(self, buf, size, timeout)
         if type(size) ~= 'number' then
             error('fio.popen.read: invalid size argument')
         end
-        timeout = timeout or -1
+        timeout = timeout or fio.TIMEOUT_INFINITY
     elseif type(buf) == 'number' then
         -- use temp. buffer
-        timeout = size or -1
+        timeout = size or fio.TIMEOUT_INFINITY
         size = buf
 
+        tmpbuf = buffer.ibuf()
+        buf = tmpbuf:reserve(size)
+    elseif buf == nil and type(size) == 'number' then
         tmpbuf = buffer.ibuf()
         buf = tmpbuf:reserve(size)
     else
@@ -270,7 +280,7 @@ end
 -- write(str)
 -- write(buf, len)
 popen_methods.write = function(self, data, size)
-    local timeout = -1.0
+    local timeout = fio.TIMEOUT_INFINITY
     if type(data) == 'table' then
         timeout = data.timeout or timeout
         size = data.size or size
@@ -286,11 +296,8 @@ popen_methods.write = function(self, data, size)
         size = #data
     end
 
-    local res, err = internal.popen_write(self.fh, data, tonumber(size), tonumber(timeout))
-    if err ~= nil then
-        return false, err
-    end
-    return res >= 0
+    return internal.popen_write(self.fh, data,
+            tonumber(size), tonumber(timeout))
 end
 
 popen_methods.status = function(self)
@@ -331,17 +338,9 @@ popen_methods.kill = function(self, sig)
     end
 
     if sig == nil then
-        sig = 'SIGTERM'
+        sig = signal.SIGTERM
     end
-    if type(sig) == 'string' then
-        sig = signal.c.signals[sig]
-        if sig == nil then
-            errno(errno.EINVAL)
-            return false, sprintf("fio.popen.kill(): unknown signal: %s", sig)
-        end
-    else
-        sig = tonumber(sig)
-    end
+    sig = tonumber(sig)
 
     return internal.popen_kill(self.fh, sig)
 end
@@ -352,14 +351,23 @@ popen_methods.wait = function(self, timeout)
     end
 
     if timeout == nil then
-        timeout = -1
+        timeout = fio.TIMEOUT_INFINITY
     else
         timeout = tonumber(timeout)
     end
 
-    local rc, err = internal.popen_wait(self.fh, timeout)
+    return internal.popen_wait(self.fh, timeout)
+end
+
+popen_methods.shutdown = function(self)
+    if self.fh == nil then
+        return false, 'Invalid object'
+    end
+
+    local c = internal.popen_get_status(self.fh)
+    local rc, err = internal.popen_shutdown(self.fh)
     if rc ~= nil then
-        self.exit_code = tonumber(rc)
+        self.exit_code = c
         self.fh = nil
         return true
     else
@@ -367,15 +375,25 @@ popen_methods.wait = function(self, timeout)
     end
 end
 
+popen_methods.close = function(self, fd)
+    if self.fh == nil then
+        return false, 'Invalid object'
+    end
+
+    if fd == nil then
+        fd = -1
+    end
+
+    return internal.popen_close(self.fh, tonumber(fd))
+end
 
 local popen_mt = { __index = popen_methods }
 
-fio.popen = function(params)
-    local argv = params.argv
-    local env = params.environment
-    local hstdin = params.stdin
-    local hstdout = params.stdout
-    local hstderr = params.stderr
+fio.popen = function(args, opts)
+    local env = opts and opts.env
+    local hstdin = opts and opts.stdin
+    local hstdout = opts and opts.stdout
+    local hstderr = opts and opts.stderr
 
     if type(hstdin) == 'table' then
         hstdin = hstdin.fh
@@ -387,35 +405,13 @@ fio.popen = function(params)
         hstderr = hstderr.fh
     end
 
-    if argv == nil or
-       type(argv) ~= 'table' or
-       table.getn(argv) < 1 then
-        local errmsg = [[Usage: fio.popen({parameters}),
-parameters - a table containing arguments to run a process.
-The following arguments are expected:
-
-argv - [mandatory] is a table of argument strings passed
-       to the new program.
-       By convention, the first of these strings should
-       contain the filename associated with the file
-       being executed.
-
-environment - [optional] is a table of strings,
-              conventionally of the form key=value,
-              which are passed as environment to the
-              new program.
-
-stdin  - [optional] overrides the child process's
-         standard input.
-stdout - [optional] overrides the child process's
-         standard output.
-stderr - [optional] overrides the child process's
-         standard error output.
-]]
-        error(errmsg)
+    if args == nil or
+       type(args) ~= 'table' or
+       table.getn(args) < 1 then
+        error('Usage: fio.popen({args}[, {opts}])')
     end
 
-    local fh,err = internal.popen(argv, env, hstdin, hstdout, hstderr)
+    local fh,err = internal.popen(args, env, hstdin, hstdout, hstderr)
     if err ~= nil then
         return nil, err
     end

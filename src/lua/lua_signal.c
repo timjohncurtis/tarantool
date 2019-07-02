@@ -40,116 +40,108 @@
 #include "lua/utils.h"
 
 #ifndef PUSHTABLE
-#define PUSHTABLE(name, method, value)	{	\
-	lua_pushliteral(L, name);		\
-	method(L, value);			\
-	lua_settable(L, -3);			\
+#define PUSHTABLE(name, value)	{	\
+	lua_pushstring(L, name);	\
+	lua_pushinteger(L, value);	\
+	lua_rawset(L, -3);		\
 }
 #endif /*PUSHTABLE*/
 
 void
 tarantool_lua_signal_init(struct lua_State *L)
 {
-	static const struct luaL_Reg signal_methods[] = {
-		{ NULL,	NULL }
+	static const struct luaL_Reg internal_methods[] = {
+		{ NULL,			NULL			}
 	};
 
-	luaL_register_module(L, "signal", signal_methods);
-
-	lua_pushliteral(L, "c");
-	lua_newtable(L);
-
-	lua_pushliteral(L, "signals");
-	lua_newtable(L);
+	luaL_register_module(L, "signal", internal_methods);
 
 #ifdef SIGINT
-	PUSHTABLE("SIGINT", lua_pushinteger, SIGINT);
+	PUSHTABLE("SIGINT", SIGINT);
 #endif
 #ifdef SIGILL
-	PUSHTABLE("SIGILL", lua_pushinteger, SIGILL);
+	PUSHTABLE("SIGILL", SIGILL);
 #endif
 #ifdef SIGABRT
-	PUSHTABLE("SIGABRT", lua_pushinteger, SIGABRT);
+	PUSHTABLE("SIGABRT", SIGABRT);
 #endif
 #ifdef SIGFPE
-	PUSHTABLE("SIGFPE", lua_pushinteger, SIGFPE);
+	PUSHTABLE("SIGFPE", SIGFPE);
 #endif
 #ifdef SIGSEGV
-	PUSHTABLE("SIGSEGV", lua_pushinteger, SIGSEGV);
+	PUSHTABLE("SIGSEGV", SIGSEGV);
 #endif
 #ifdef SIGTERM
-	PUSHTABLE("SIGTERM", lua_pushinteger, SIGTERM);
+	PUSHTABLE("SIGTERM", SIGTERM);
 #endif
 
 #ifdef SIGHUP
-	PUSHTABLE("SIGHUP", lua_pushinteger, SIGHUP);
+	PUSHTABLE("SIGHUP", SIGHUP);
 #endif
 #ifdef SIGQUIT
-	PUSHTABLE("SIGQUIT", lua_pushinteger, SIGQUIT);
+	PUSHTABLE("SIGQUIT", SIGQUIT);
 #endif
 #ifdef SIGTRAP
-	PUSHTABLE("SIGTRAP", lua_pushinteger, SIGTRAP);
+	PUSHTABLE("SIGTRAP", SIGTRAP);
 #endif
 #ifdef SIGKILL
-	PUSHTABLE("SIGKILL", lua_pushinteger, SIGKILL);
+	PUSHTABLE("SIGKILL", SIGKILL);
 #endif
 #ifdef SIGBUS
-	PUSHTABLE("SIGBUS", lua_pushinteger, SIGBUS);
+	PUSHTABLE("SIGBUS", SIGBUS);
 #endif
 #ifdef SIGSYS
-	PUSHTABLE("SIGSYS", lua_pushinteger, SIGSYS);
+	PUSHTABLE("SIGSYS", SIGSYS);
 #endif
 #ifdef SIGPIPE
-	PUSHTABLE("SIGPIPE", lua_pushinteger, SIGPIPE);
+	PUSHTABLE("SIGPIPE", SIGPIPE);
 #endif
 #ifdef SIGALRM
-	PUSHTABLE("SIGALRM", lua_pushinteger, SIGALRM);
+	PUSHTABLE("SIGALRM", SIGALRM);
 #endif
 
 #ifdef SIGURG
-	PUSHTABLE("SIGURG", lua_pushinteger, SIGURG);
+	PUSHTABLE("SIGURG", SIGURG);
 #endif
 #ifdef SIGSTOP
-	PUSHTABLE("SIGSTOP", lua_pushinteger, SIGSTOP);
+	PUSHTABLE("SIGSTOP", SIGSTOP);
 #endif
 #ifdef SIGTSTP
-	PUSHTABLE("SIGTSTP", lua_pushinteger, SIGTSTP);
+	PUSHTABLE("SIGTSTP", SIGTSTP);
 #endif
 #ifdef SIGCONT
-	PUSHTABLE("SIGCONT", lua_pushinteger, SIGCONT);
+	PUSHTABLE("SIGCONT", SIGCONT);
 #endif
 #ifdef SIGCHLD
-	PUSHTABLE("SIGCHLD", lua_pushinteger, SIGCHLD);
+	PUSHTABLE("SIGCHLD", SIGCHLD);
 #endif
 #ifdef SIGTTIN
-	PUSHTABLE("SIGTTIN", lua_pushinteger, SIGTTIN);
+	PUSHTABLE("SIGTTIN", SIGTTIN);
 #endif
 #ifdef SIGTTOU
-	PUSHTABLE("SIGTTOU", lua_pushinteger, SIGTTOU);
+	PUSHTABLE("SIGTTOU", SIGTTOU);
 #endif
 #ifdef SIGPOLL
-	PUSHTABLE("SIGPOLL", lua_pushinteger, SIGPOLL);
+	PUSHTABLE("SIGPOLL", SIGPOLL);
 #endif
 #ifdef SIGXCPU
-	PUSHTABLE("SIGXCPU", lua_pushinteger, SIGXCPU);
+	PUSHTABLE("SIGXCPU", SIGXCPU);
 #endif
 #ifdef SIGXFSZ
-	PUSHTABLE("SIGXFSZ", lua_pushinteger, SIGXFSZ);
+	PUSHTABLE("SIGXFSZ", SIGXFSZ);
 #endif
 #ifdef SIGVTALRM
-	PUSHTABLE("SIGVTALRM", lua_pushinteger, SIGVTALRM);
+	PUSHTABLE("SIGVTALRM", SIGVTALRM);
 #endif
 #ifdef SIGPROF
-	PUSHTABLE("SIGPROF", lua_pushinteger, SIGPROF);
+	PUSHTABLE("SIGPROF", SIGPROF);
 #endif
 #ifdef SIGUSR1
-	PUSHTABLE("SIGUSR1", lua_pushinteger, SIGUSR1);
+	PUSHTABLE("SIGUSR1", SIGUSR1);
 #endif
 #ifdef SIGUSR2
-	PUSHTABLE("SIGUSR2", lua_pushinteger, SIGUSR2);
+	PUSHTABLE("SIGUSR2", SIGUSR2);
 #endif
-	lua_settable(L, -3); /* "signals" */
 
-	lua_settable(L, -3); /* "c" */
-	lua_pop(L, 1);
+	lua_pop(L, 1); /* signal */
 }

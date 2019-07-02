@@ -130,7 +130,7 @@ coio_on_stop(void *data)
 void
 coio_init(void)
 {
-	popen_initialize();
+	popen_init();
 	eio_set_thread_on_start(coio_on_start, NULL);
 	eio_set_thread_on_stop(coio_on_stop, NULL);
 }

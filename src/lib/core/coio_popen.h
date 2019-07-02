@@ -35,12 +35,13 @@
 extern "C" {
 #endif /* defined(__cplusplus) */
 
-#include "evio.h"
 #include <stdarg.h>
+#include <sys/types.h>
+#include <stdbool.h>
 
 /**
  * Special values of the file descriptors passed to fio.popen
- * */
+ */
 enum {
 	/**
 	 * Tells fio.popen to open a handle for
@@ -58,76 +59,103 @@ enum {
 struct popen_handle;
 
 /**
- * Possible status of the process started via fio.popen
- **/
-enum popen_status {
-
-	/**
-	 * The process is alive and well.
-	 */
-	POPEN_RUNNING = 1,
-
-	/**
-	 * The process exited.
-	 */
-	POPEN_EXITED = 2,
-
-	/**
-	 * The process terminated by a signal.
-	 */
-	POPEN_KILLED = 3,
-
-	/**
-	 * The process terminated abnormally.
-	 */
-	POPEN_DUMPED = 4
-};
+ * Initializes inner data of fio.popen
+ */
+void
+popen_init();
 
 /**
- * Initializes inner data of fio.popen
- * */
+ * Release resources acquired by fio.popen
+ */
 void
-popen_initialize();
+popen_free();
 
-ssize_t
-popen_new(va_list ap);
+/**
+ * The function opens a process by creating a pipe
+ * forking.
+ *
+ * @param argv - is an array of character pointers
+ * to the arguments terminated by a null pointer.
+ *
+ * @param env - is the pointer to an array
+ * of character pointers to the environment strings.
+ *
+ * @param stdin_fd - the file handle to be redirected to the
+ * child process's STDIN.
+ *
+ * @param stdout_fd - the file handle receiving the STDOUT
+ * output of the child process.
+ *
+ * @param stderr_fd - the file handle receiving the STDERR
+ * output of the child process.
+ *
+ * The stdin_fd, stdout_fd & stderr_fd accept file descriptors
+ * from open() or the following values:
+ *
+ * FIO_PIPE - opens a pipe, binds it with child's
+ * input/output. The pipe is available for reading/writing.
+ *
+ * FIO_DEVNULL - redirects output from process to /dev/null.
+ *
+ * @return handle of the pipe for reading or writing
+ * (depends on value of type).
+ * In a case of error returns NULL.
+ */
+struct popen_handle *
+popen_new(char **argv, char **env,
+	int stdin_fd, int stdout_fd, int stderr_fd);
 
 /**
  * The function releases allocated resources.
  * The function doesn't wait for the associated process
  * to terminate.
  *
- * @param fh handle returned by fio.popen.
+ * @param handle - a handle returned by fio.popen.
  *
  * @return 0 if the process is terminated
  * @return -1 for an error
  */
 int
-popen_destroy(struct popen_handle *fh);
+popen_destroy(struct popen_handle *handle);
+
+/**
+ * The function closes the specified file descriptor.
+ *
+ * @param handle a handle returned by fio.popen.
+ * @param fd file descriptor to be closed.
+ * If fd = -1 then all open descriptors are
+ * being closed.
+ * The function doesn't change the state of
+ * the associated process.
+ *
+ * @return 0 on success
+ * @return -1 if input parameters are wrong.
+ */
+int
+popen_close(struct popen_handle *handle, int fd);
+
 
 /**
  * The function reads up to count bytes from the handle
  * associated with the child process.
  * Returns immediately
  *
- * @param fd handle returned by fio.popen.
+ * @param handle a handle returned by fio.popen.
  * @param buf a buffer to be read into
  * @param count size of buffer in bytes
- * @param read_bytes A pointer to the
- * variable that receives the number of bytes read.
  * @param source_id A pointer to the variable that receives a
  * source stream id, 1 - for STDOUT, 2 - for STDERR.
  *
- * @return 0 data were successfully read
- * @return -1 an error occurred, see errno for error code
+ * @return on success returns number of bytes read (>= 0)
+ * @return -1 on error, see errno for error code
  *
- * If there is nothing to read yet function returns -1
- * and errno set no EAGAIN.
+ * On timeout function returns -1
+ * and errno set to ETIMEDOUT.
  */
-int
-popen_read(struct popen_handle *fh, void *buf, size_t count,
-	size_t *read_bytes, int *source_id,
-	ev_tstamp timeout);
+ssize_t
+popen_read(struct popen_handle *handle, void *buf, size_t count,
+	int *source_id,
+	double timeout);
 
 /**
  * The function writes up to count bytes to the handle
@@ -135,7 +163,7 @@ popen_read(struct popen_handle *fh, void *buf, size_t count,
  * Tries to write as much as possible without blocking
  * and immediately returns.
  *
- * @param fd handle returned by fio.popen.
+ * @param handle a handle returned by fio.popen.
  * @param buf a buffer to be written from
  * @param count size of buffer in bytes
  * @param written A pointer to the
@@ -147,47 +175,47 @@ popen_read(struct popen_handle *fh, void *buf, size_t count,
  * whether all data were written or not.
  * @return -1 an error occurred, see errno for error code
  *
- * If the writing can block, function returns -1
- * and errno set no EAGAIN.
+ * On timeout, function returns -1
+ * and errno set no ETIMEDOUT. The 'written' contains number
+ * of written bytes before timeout.
  */
 int
-popen_write(struct popen_handle *fh, const void *buf, size_t count,
-	size_t *written, ev_tstamp timeout);
+popen_write(struct popen_handle *handle, const void *buf, size_t count,
+	size_t *written, double timeout);
 
 
 /**
  * The function send the specified signal
  * to the associated process.
  *
- * @param fd - handle returned by fio.popen.
+ * @param handle a handle returned by fio.popen.
  *
  * @return 0 on success
  * @return -1 an error occurred, see errno for error code
  */
 int
-popen_kill(struct popen_handle *fh, int signal_id);
+popen_kill(struct popen_handle *handle, int signal_id);
 
 /**
  * Wait for the associated process to terminate.
  * The function doesn't release the allocated resources.
  *
- * @param fd handle returned by fio.popen.
+ * If associated process is terminated the function returns immediately.
+ *
+ * @param handle a handle returned by fio.popen.
  *
  * @param timeout number of second to wait before function exit with error.
  * If function exited due to timeout the errno equals to ETIMEDOUT.
  *
- * @exit_code On success contains the exit code as a positive number
- * or signal id as a negative number.
-
  * @return On success function returns 0, and -1 on error.
  */
 int
-popen_wait(struct popen_handle *fh, ev_tstamp timeout, int *exit_code);
+popen_wait(struct popen_handle *handle, double timeout);
 
 /**
  * Returns descriptor of the specified file.
  *
- * @param fd - handle returned by fio.popen.
+ * @param handle a handle returned by fio.popen.
  * @param file_no accepts one of the
  * following values:
  * STDIN_FILENO,
@@ -197,30 +225,23 @@ popen_wait(struct popen_handle *fh, ev_tstamp timeout, int *exit_code);
  * @return file descriptor or -1 if not available
  */
 int
-popen_get_std_file_handle(struct popen_handle *fh, int file_no);
+popen_get_std_file_handle(struct popen_handle *handle, int file_no);
 
 
 /**
  * Returns status of the associated process.
  *
- * @param fd - handle returned by fio.popen.
+ * @param handle a handle returned by fio.popen.
  *
- * @param exit_code - if not NULL accepts the exit code
- * if the process terminated normally or signal id
- * if process was termianted by signal.
+ * @param status if not NULL accepts the exit code
+ * if the process terminated normally or -signal id
+ * if process was terminated by signal.
  *
- * @return one of the following values:
- * POPEN_RUNNING if the process is alive
- * POPEN_EXITED if the process was terminated normally
- * POPEN_KILLED if the process was terminated by a signal
+ * @return false if process is alive and
+ * true if process was terminated
  */
-int
-popen_get_status(struct popen_handle *fh, int *exit_code);
-
-void
-popen_setup_sigchld_handler();
-void
-popen_reset_sigchld_handler();
+bool
+popen_get_status(struct popen_handle *handle, int *status);
 
 #if defined(__cplusplus)
 } /* extern "C" */

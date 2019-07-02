@@ -47,6 +47,9 @@
 #include "lua/utils.h"
 #include "coio_file.h"
 #include "coio_popen.h"
+#include "small/region.h"
+#include "core/fiber.h"
+
 
 static uint32_t CTID_STRUCT_POPEN_HANDLE_REF = 0;
 
@@ -706,27 +709,27 @@ lbox_fio_copyfile(struct lua_State *L)
 	return lbox_fio_pushbool(L, coio_copyfile(source, dest) == 0);
 }
 
-static bool
-popen_verify_argv(struct lua_State *L)
+/**
+ * Returns an array of strings passed in a form of lua table.
+ * The table must contain at least one string.
+ * @return an array satisfying the execve requirements:
+ * for N strings returns an array of N=1 elements,
+ * where the trailing element is NULL.
+ * To release memory call free() for each string and for the array itself.
+ */
+static char **
+lbox_fio_popen_get_args(struct lua_State *L, int index, struct region *region)
 {
-	if (!lua_istable(L, 1))
-		return false;
-	int num = (int)lua_objlen(L, 1);  /*luaL_getn(L,1);*/
-	return num >= 1;
-}
-
-static char**
-popen_extract_strarray(struct lua_State *L, int index, int* array_size)
-{
-	if (lua_type(L, index) != LUA_TTABLE) {
-		if (array_size)
-			*array_size = 0;
+	if (!lua_istable(L, index)) {
 		return NULL;
 	}
 
-	size_t num = lua_objlen(L, index);  /*luaL_getn(L,index);*/
+	size_t num = lua_objlen(L, index);
+	if (num < 1)
+		return NULL;
 
-	char** array = calloc(num+1, sizeof(char*));
+	char **array = region_alloc(region,
+				    (num + 1) * sizeof(char*));
 	/*
 	 * The last item in the array must be NULL
 	 */
@@ -738,23 +741,20 @@ popen_extract_strarray(struct lua_State *L, int index, int* array_size)
 		lua_rawgeti(L, index, i+1);
 		size_t slen = 0;
 		const char* str = lua_tolstring(L, -1, &slen);
-		if (!str)
-			str = "";
-		array[i] = strdup(str);
+		char* str2 = region_alloc(region, (slen +1) * sizeof(char));
+		strcpy(str2, str);
+		str2[slen] = '\0';
+		array[i] = str2;
 		lua_pop(L, 1);
 	}
 
-	if (array_size)
-		*array_size = num;
-	/*
-	 * The number of elements doesn't include
-	 * the trailing NULL pointer
-	 */
+	array[num] = NULL;
+
 	return array;
 }
 
 static struct popen_handle *
-fio_popen_get_handle(lua_State *L, int idx)
+lbox_fio_popen_get_handle(lua_State *L, int idx)
 {
 	uint32_t cdata_type;
 	struct popen_handle **handle_ptr = luaL_checkcdata(L, idx, &cdata_type);
@@ -764,7 +764,7 @@ fio_popen_get_handle(lua_State *L, int idx)
 }
 
 static void
-fio_popen_invalidate_handle(lua_State *L, int idx)
+lbox_fio_popen_invalidate_handle(lua_State *L, int idx)
 {
 	uint32_t cdata_type;
 	struct popen_handle **handle_ptr = luaL_checkcdata(L, idx, &cdata_type);
@@ -776,7 +776,7 @@ fio_popen_invalidate_handle(lua_State *L, int idx)
 static int
 lbox_fio_popen_gc(lua_State *L)
 {
-	struct popen_handle *handle = fio_popen_get_handle(L,1);
+	struct popen_handle *handle = lbox_fio_popen_get_handle(L,1);
 
 	if (handle)
 		popen_destroy(handle);
@@ -784,22 +784,23 @@ lbox_fio_popen_gc(lua_State *L)
 }
 
 static int
-lbox_fio_popen(struct lua_State *L)
-{
-	if (lua_gettop(L) < 1) {
+lbox_fio_popen(struct lua_State *L) {
+	if (lua_gettop(L) < 5) {
 		usage:
 		luaL_error(L, "fio.popen: Invalid arguments");
 	}
-
-	if (!popen_verify_argv(L))
-		goto usage;
 
 	int stdin_fd = FIO_PIPE;
 	int stdout_fd = FIO_PIPE;
 	int stderr_fd = FIO_PIPE;
 
-	char** argv = popen_extract_strarray(L, 1, NULL);
-	char** env = popen_extract_strarray(L, 2, NULL);
+	size_t region_svp = region_used(&fiber()->gc);
+	char **argv = lbox_fio_popen_get_args(L, 1, &fiber()->gc);
+	if (argv == NULL) {
+		region_truncate(&fiber()->gc, region_svp);
+		goto usage;
+	}
+	char** env = lbox_fio_popen_get_args(L, 2, &fiber()->gc);
 
 	if (lua_isnumber(L, 3))
 		stdin_fd = lua_tonumber(L, 3);
@@ -808,9 +809,13 @@ lbox_fio_popen(struct lua_State *L)
 	if (lua_isnumber(L, 5))
 		stderr_fd = lua_tonumber(L, 5);
 
-	struct popen_handle* handle = NULL;
-	if (coio_call(popen_new, argv, env, stdin_fd, stdout_fd,
-		      stderr_fd, &handle) < 0) {
+	struct popen_handle* handle = popen_new(argv, env,
+		stdin_fd, stdout_fd, stderr_fd);
+
+	/* release argv & env */
+	region_truncate(&fiber()->gc, region_svp);
+
+	if (handle == NULL) {
 		lua_pushnil(L);
 		lbox_fio_pushsyserror(L);
 		return 2;
@@ -820,7 +825,6 @@ lbox_fio_popen(struct lua_State *L)
 			luaL_pushcdata(L, CTID_STRUCT_POPEN_HANDLE_REF) = handle;
 		lua_pushcfunction(L, lbox_fio_popen_gc);
 		luaL_setcdatagc(L, -2);
-
 		return 1;
 	}
 }
@@ -828,13 +832,13 @@ lbox_fio_popen(struct lua_State *L)
 static int
 lbox_fio_popen_read(struct lua_State *L)
 {
-	/* popen_read(self.fh, buf, size, seconds) */
-
-	void* fh = fio_popen_get_handle(L, 1);
+	void* handle = lbox_fio_popen_get_handle(L, 1);
 	uint32_t ctypeid;
 	char *buf = *(char **)luaL_checkcdata(L, 2, &ctypeid);
 	size_t len = lua_tonumber(L, 3);
 	ev_tstamp seconds = lua_tonumber(L, 4);
+	if (seconds < 0)
+		seconds = TIMEOUT_INFINITY;
 
 	if (!len) {
 		lua_pushinteger(L, 0);
@@ -843,12 +847,11 @@ lbox_fio_popen_read(struct lua_State *L)
 	}
 
 	int output_number = 0;
-	size_t received = 0;
-	int rc = popen_read(fh, buf, len,
-			    &received, &output_number,
-			    seconds);
-	if (rc == 0) {                /* The reading's succeeded */
-		lua_pushinteger(L, received);
+	ssize_t rc = popen_read(handle, buf, len,
+				&output_number,
+				seconds);
+	if (rc >= 0) {                /* The reading's succeeded */
+		lua_pushinteger(L, rc);
 		lua_pushinteger(L, output_number);
 		return 2;
 	} else {
@@ -862,48 +865,45 @@ lbox_fio_popen_read(struct lua_State *L)
 static int
 lbox_fio_popen_write(struct lua_State *L)
 {
-	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	struct popen_handle* handle = lbox_fio_popen_get_handle(L, 1);
 	const char *buf = lua_tostring(L, 2);
 	uint32_t ctypeid = 0;
 	if (buf == NULL)
 		buf = *(const char **)luaL_checkcdata(L, 2, &ctypeid);
 	size_t len = lua_tointeger(L, 3);
 	double timeout = lua_tonumber(L, 4);
+	if (timeout < 0)
+		timeout = TIMEOUT_INFINITY;
 
 	size_t written = 0;
-	int rc = popen_write(fh, buf, len,
+	int rc = popen_write(handle, buf, len,
 			     &written, timeout);
-	if (rc == 0 && written == len) {
+	if (rc == 0) {
 		/* The writing's succeeded */
-		lua_pushinteger(L, (ssize_t) written);
-		return 1;
-	} else {
-		lua_pushnil(L);
-		lbox_fio_pushsyserror(L);
+		lua_pushboolean(L, true);
+		lua_pushinteger(L, written);
 		return 2;
+	} else {
+		if (errno != ETIMEDOUT)
+			written = 0;
+		lua_pushboolean(L, false);
+		lua_pushinteger(L, written);
+		lbox_fio_pushsyserror(L);
+		return 3;
 	}
 }
 
 static int
 lbox_fio_popen_get_status(struct lua_State *L)
 {
-	struct popen_handle* fh = fio_popen_get_handle(L, 1);
-	int exit_code = 0;
-	int res = popen_get_status(fh, &exit_code);
+	struct popen_handle* handle = lbox_fio_popen_get_handle(L, 1);
+	int status = 0;
+	bool terminated = popen_get_status(handle, &status);
 
-	switch (res) {
-		case POPEN_RUNNING:
-			lua_pushnil(L);
-			break;
-
-		case POPEN_KILLED:
-			lua_pushinteger(L, -exit_code);
-			break;
-
-		default:
-			lua_pushinteger(L, exit_code);
-			break;
-	}
+	if (terminated)
+		lua_pushinteger(L, status);
+	else
+		lua_pushnil(L);
 
 	return 1;
 }
@@ -911,9 +911,9 @@ lbox_fio_popen_get_status(struct lua_State *L)
 static int
 lbox_fio_popen_get_std_file_handle(struct lua_State *L)
 {
-	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	struct popen_handle* handle = lbox_fio_popen_get_handle(L, 1);
 	int file_no = lua_tonumber(L, 2);
-	int res = popen_get_std_file_handle(fh, file_no);
+	int res = popen_get_std_file_handle(handle, file_no);
 
 	if (res < 0)
 		lua_pushnil(L);
@@ -925,10 +925,10 @@ lbox_fio_popen_get_std_file_handle(struct lua_State *L)
 static int
 lbox_fio_popen_kill(struct lua_State *L)
 {
-	struct popen_handle* fh = fio_popen_get_handle(L, 1);
+	struct popen_handle* handle = lbox_fio_popen_get_handle(L, 1);
 	int signal_id = lua_tonumber(L, 2);
 
-	int res = popen_kill(fh, signal_id);
+	int res = popen_kill(handle, signal_id);
 	if (res < 0){
 		lua_pushboolean(L, false);
 		lbox_fio_pushsyserror(L);
@@ -942,30 +942,53 @@ lbox_fio_popen_kill(struct lua_State *L)
 static int
 lbox_fio_popen_wait(struct lua_State *L)
 {
-	struct popen_handle *fh = fio_popen_get_handle(L, 1);
-	assert(fh);
+	struct popen_handle *handle = lbox_fio_popen_get_handle(L, 1);
+	assert(handle);
 	ev_tstamp timeout = lua_tonumber(L, 2);
+	if (timeout < 0)
+		timeout = TIMEOUT_INFINITY;
 
-	/*
-	 * On success function returns an
-	 * exit code as a positive number
-	 * or signal id as a negative number.
-	 * If failed, rc is nul and err
-	 * contains a error message.
-	 */
-
-	int exit_code =0;
-	int res = popen_wait(fh, timeout, &exit_code);
+	int res = popen_wait(handle, timeout);
 	if (res < 0){
-		lua_pushnil(L);
+		lua_pushboolean(L, false);
 		lbox_fio_pushsyserror(L);
 		return 2;
 	} else {
-		/* Release the allocated resources */
-		popen_destroy(fh);
-		fio_popen_invalidate_handle(L, 1);
+		lua_pushboolean(L, true);
+		return 1;
+	}
+}
 
-		lua_pushinteger(L, exit_code);
+static int
+lbox_fio_popen_shutdown(struct lua_State *L)
+{
+	struct popen_handle *handle = lbox_fio_popen_get_handle(L, 1);
+	assert(handle);
+	int res = popen_destroy(handle);
+	if (res < 0){
+		lua_pushboolean(L, false);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	} else {
+		lbox_fio_popen_invalidate_handle(L, 1);
+		lua_pushboolean(L, true);
+		return 1;
+	}
+}
+
+static int
+lbox_fio_popen_close(struct lua_State *L)
+{
+	struct popen_handle *handle = lbox_fio_popen_get_handle(L, 1);
+	assert(handle);
+	int fd = lua_tointeger(L, 2);
+	int res = popen_close(handle, fd);
+	if (res < 0){
+		lua_pushboolean(L, false);
+		lbox_fio_pushsyserror(L);
+		return 2;
+	} else {
+		lua_pushboolean(L, true);
 		return 1;
 	}
 }
@@ -1020,6 +1043,8 @@ tarantool_lua_fio_init(struct lua_State *L)
 		{ "popen_get_std_file_handle",	lbox_fio_popen_get_std_file_handle },
 		{ "popen_kill",		lbox_fio_popen_kill 		},
 		{ "popen_wait",		lbox_fio_popen_wait 		},
+		{ "popen_shutdown",	lbox_fio_popen_shutdown		},
+		{ "popen_close",	lbox_fio_popen_close		},
 		{ NULL,			NULL				}
 	};
 	luaL_register(L, NULL, internal_methods);

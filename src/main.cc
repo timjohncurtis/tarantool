@@ -307,8 +307,6 @@ signal_free(void)
 	int i;
 	for (i = 0; i < ev_sig_count; i++)
 		ev_signal_stop(loop(), &ev_sigs[i]);
-
-	popen_reset_sigchld_handler();
 }
 
 /** Make sure the child has a default signal disposition. */
@@ -376,8 +374,6 @@ signal_init(void)
 	    sigaction(SIGFPE, &sa, 0) == -1) {
 		panic_syserror("sigaction");
 	}
-
-	popen_setup_sigchld_handler();
 
 	ev_signal_init(&ev_sigs[0], sig_checkpoint, SIGUSR1);
 	ev_signal_init(&ev_sigs[1], signal_cb, SIGINT);
@@ -604,6 +600,8 @@ tarantool_free(void)
 
 	/* Shutdown worker pool. Waits until threads terminate. */
 	coio_shutdown();
+
+	popen_free();
 
 	box_free();
 
