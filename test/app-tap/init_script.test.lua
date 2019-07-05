@@ -2,8 +2,12 @@
 --
 -- Testing init script
 --
+
+local LISTEN_SOCKET = 'init_script.listen.sock'
+
+os.remove(LISTEN_SOCKET)
 box.cfg{
-    listen = os.getenv("LISTEN"),
+    listen = 'unix/:./' .. LISTEN_SOCKET,
     pid_file = "box.pid",
     memtx_memory=107374182,
     log="tarantool.log"
@@ -86,4 +90,5 @@ fiber.sleep(0.0)
 assert (require ~= nil)
 
 space:drop()
+os.remove(LISTEN_SOCKET)
 os.exit()

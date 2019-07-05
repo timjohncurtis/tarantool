@@ -15,8 +15,11 @@ local IPROTO_OK                 = 0x00
 local IPROTO_SCHEMA_VERSION     = 0x05
 local IPROTO_STATUS_KEY         = 0x00
 
+local LISTEN_SOCKET = 'gh-4077.listen.sock'
+
+os.remove(LISTEN_SOCKET)
 box.cfg({
-    listen = os.getenv('LISTEN') or 'localhost:3301',
+    listen = 'unix/:./' .. LISTEN_SOCKET,
 })
 
 box.schema.user.grant('guest', 'read,write,execute', 'universe')
@@ -69,4 +72,5 @@ test:is_deeply(res, exp_res, 'verify inserted data')
 box.execute('drop table T')
 box.schema.user.revoke('guest', 'read,write,execute', 'universe')
 
+os.remove(LISTEN_SOCKET)
 os.exit(test:check() == true and 0 or 1)

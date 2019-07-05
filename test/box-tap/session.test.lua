@@ -4,11 +4,13 @@ local tap = require('tap')
 local test = tap.test('session')
 local fiber = require('fiber')
 
+local LISTEN_SOCKET = 'session.listen.sock'
+
+os.remove(LISTEN_SOCKET)
 box.cfg{
-    listen = os.getenv('LISTEN');
+    listen = 'unix/:./' .. LISTEN_SOCKET,
     log="tarantool.log";
 }
-
 local uri = require('uri').parse(box.cfg.listen)
 local HOST, PORT = uri.host or 'localhost', uri.service
 session = box.session
@@ -217,4 +219,5 @@ box.schema.user.revoke('guest', 'execute', 'function', 'f2')
 
 inspector:cmd('stop server session with cleanup=1')
 session = nil
+os.remove(LISTEN_SOCKET)
 os.exit(test:check() == true and 0 or -1)

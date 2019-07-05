@@ -6,8 +6,11 @@ local tap = require('tap')
 local netbox = require('net.box')
 local urilib = require('uri')
 
+local LISTEN_SOCKET = 'auth.listen.sock'
+os.remove(LISTEN_SOCKET)
+
 box.cfg {
-    listen = os.getenv('LISTEN');
+    listen = 'unix/:./' .. LISTEN_SOCKET,
     log="tarantool.log";
     memtx_memory=100*1024*1024;
 }
@@ -163,4 +166,5 @@ space:drop()
 box.schema.user.drop('test', { if_exists = true})
 box.schema.user.drop("test2", { if_exists = true})
 
+os.remove(LISTEN_SOCKET)
 os.exit(test:check() == true and 0 or -1)
