@@ -43,6 +43,7 @@
 #include "cbus.h"
 #include "coio_task.h"
 #include "replication.h"
+#include "xrow_buf.h"
 
 enum {
 	/**
@@ -156,6 +157,14 @@ struct wal_writer
 	 * Used for replication relays.
 	 */
 	struct rlist watchers;
+	/**
+	 * In-memory WAl write buffer used to encode transaction rows and
+	 * write them to an xlog file. An in-memory buffer allows us to
+	 * preserve xrows after transaction processing was finished.
+	 * This buffer will be used by replication to fetch xrows from memory
+	 * without xlog files access.
+	 */
+	struct xrow_buf xrow_buf;
 };
 
 struct wal_msg {
@@ -933,6 +942,7 @@ wal_assign_lsn(struct vclock *vclock_diff, struct vclock *base,
 	int64_t tsn = 0;
 	/** Assign LSN to all local rows. */
 	for ( ; row < end; row++) {
+		(*row)->tm = ev_now(loop());
 		if ((*row)->replica_id == 0) {
 			(*row)->lsn = vclock_inc(vclock_diff, instance_id) +
 				      vclock_get(base, instance_id);
@@ -1016,25 +1026,52 @@ wal_write_to_disk(struct cmsg *msg)
 	int rc;
 	struct journal_entry *entry;
 	struct stailq_entry *last_committed = NULL;
+	/* Start a wal memory buffer transaction. */
+	xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 	stailq_foreach_entry(entry, &wal_msg->commit, fifo) {
 		wal_assign_lsn(&vclock_diff, &writer->vclock,
 			       entry->rows, entry->rows + entry->n_rows);
 		entry->res = vclock_sum(&vclock_diff) +
 			     vclock_sum(&writer->vclock);
-		rc = xlog_write_entry(l, entry);
-		if (rc < 0)
+		struct iovec *iov;
+		int iovcnt = xrow_buf_write(&writer->xrow_buf, entry->rows,
+					    entry->rows + entry->n_rows, &iov);
+		if (iovcnt < 0) {
+			xrow_buf_tx_rollback(&writer->xrow_buf);
 			goto done;
+		}
+		xlog_tx_begin(l);
+		if (xlog_write_iov(l, iov, iovcnt, entry->n_rows) < 0) {
+			xlog_tx_rollback(l);
+			xrow_buf_tx_rollback(&writer->xrow_buf);
+			goto done;
+		}
+		rc = xlog_tx_commit(l);
+		if (rc < 0) {
+			/* Failed write. */
+			xrow_buf_tx_rollback(&writer->xrow_buf);
+			goto done;
+		}
 		if (rc > 0) {
+			/*
+			 * Data flushed to disk, start a new memory
+			 * buffer transaction
+			 */
 			writer->checkpoint_wal_size += rc;
 			last_committed = &entry->fifo;
 			vclock_merge(&writer->vclock, &vclock_diff);
+			xrow_buf_tx_commit(&writer->xrow_buf);
+			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 		}
 		/* rc == 0: the write is buffered in xlog_tx */
 	}
-	rc = xlog_flush(l);
-	if (rc < 0)
-		goto done;
 
+	rc = xlog_flush(l);
+	if (rc < 0) {
+		xrow_buf_tx_rollback(&writer->xrow_buf);
+		goto done;
+	}
+	xrow_buf_tx_commit(&writer->xrow_buf);
 	writer->checkpoint_wal_size += rc;
 	last_committed = stailq_last(&wal_msg->commit);
 	vclock_merge(&writer->vclock, &vclock_diff);
@@ -1102,6 +1139,7 @@ wal_writer_f(va_list ap)
 {
 	(void) ap;
 	struct wal_writer *writer = &wal_writer_singleton;
+	xrow_buf_create(&writer->xrow_buf);
 
 	/** Initialize eio in this thread */
 	coio_enable();
@@ -1141,6 +1179,7 @@ wal_writer_f(va_list ap)
 		xlog_close(&vy_log_writer.xlog, false);
 
 	cpipe_destroy(&writer->tx_prio_pipe);
+	xrow_buf_destroy(&writer->xrow_buf);
 	return 0;
 }
 

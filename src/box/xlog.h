@@ -493,13 +493,27 @@ ssize_t
 xlog_fallocate(struct xlog *log, size_t size);
 
 /**
- * Write a row to xlog, 
+ * Write a row into a xlog,
  *
  * @retval count of writen bytes
  * @retval -1 for error
  */
 ssize_t
 xlog_write_row(struct xlog *log, const struct xrow_header *packet);
+
+/**
+ * Write an iov vector with rows into a xlog,
+ *
+ * @param xlog a xlog file to write into
+ * @param iov an iovec with encoded rows data
+ * @param iovcnt count of iovec members
+ * @param row_count count of encoded rows
+ *
+ * @retval count of writen bytes
+ * @retval -1 for error
+ */
+ssize_t
+xlog_write_iov(struct xlog *xlog, struct iovec *iov, int iovcnt, int row_count);
 
 /**
  * Prevent xlog row buffer offloading, should be use
