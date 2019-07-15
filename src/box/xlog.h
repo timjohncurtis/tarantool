@@ -493,13 +493,26 @@ ssize_t
 xlog_fallocate(struct xlog *log, size_t size);
 
 /**
- * Write a row to xlog, 
+ * Add a row to a log and possibly flush the log.
  *
  * @retval count of writen bytes
  * @retval -1 for error
  */
 ssize_t
 xlog_write_row(struct xlog *log, const struct xrow_header *packet);
+
+/**
+ * Write an xrow represented as a ready-to-write array of buffers.
+ *
+ * @param xlog An xlog file to write into.
+ * @param iov An iovec with encoded row data.
+ * @param iovcnt Length of @a iov.
+ *
+ * @retval >=0 Count of written bytes.
+ * @retval <0 Error.
+ */
+ssize_t
+xlog_write_iov(struct xlog *xlog, struct iovec *iov, int iovcnt);
 
 /**
  * Prevent xlog row buffer offloading, should be use

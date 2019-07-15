@@ -1275,14 +1275,8 @@ xlog_tx_write(struct xlog *log)
 	return written;
 }
 
-/*
- * Add a row to a log and possibly flush the log.
- *
- * @retval  -1 error, check diag.
- * @retval >=0 the number of bytes written to buffer.
- */
 ssize_t
-xlog_write_row(struct xlog *log, const struct xrow_header *packet)
+xlog_write_iov(struct xlog *log, struct iovec *iov, int iovcnt)
 {
 	/*
 	 * Automatically reserve space for a fixheader when adding
@@ -1299,14 +1293,6 @@ xlog_write_row(struct xlog *log, const struct xrow_header *packet)
 
 	struct obuf_svp svp = obuf_create_svp(&log->obuf);
 	size_t page_offset = obuf_size(&log->obuf);
-	/** encode row into iovec */
-	struct iovec iov[XROW_IOVMAX];
-	/** don't write sync to the disk */
-	int iovcnt = xrow_header_encode(packet, 0, iov, 0);
-	if (iovcnt < 0) {
-		obuf_rollback_to_svp(&log->obuf, &svp);
-		return -1;
-	}
 	for (int i = 0; i < iovcnt; ++i) {
 		struct errinj *inj = errinj(ERRINJ_WAL_WRITE_PARTIAL,
 					    ERRINJ_INT);
@@ -1335,6 +1321,17 @@ xlog_write_row(struct xlog *log, const struct xrow_header *packet)
 		return -1;
 
 	return row_size;
+}
+
+ssize_t
+xlog_write_row(struct xlog *log, const struct xrow_header *packet)
+{
+	struct iovec iov[XROW_IOVMAX];
+	int iovcnt = xrow_header_encode(packet, 0, iov, 0);
+	if (iovcnt < 0)
+		return -1;
+	assert(iovcnt <= XROW_IOVMAX);
+	return xlog_write_iov(log, iov, iovcnt);
 }
 
 /**
