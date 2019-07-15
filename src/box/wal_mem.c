@@ -212,3 +212,62 @@ error:
 	return -1;
 }
 
+int
+wal_mem_cursor_create(struct wal_mem *wal_mem,
+		      struct wal_mem_cursor *wal_mem_cursor,
+		      struct vclock *vclock)
+{
+	uint64_t buf_index;
+	for (buf_index = wal_mem->first_buf_index;
+	     buf_index <= wal_mem->last_buf_index;
+	     ++buf_index) {
+		struct wal_mem_buf *mem_buf = wal_mem->buf +
+				      wal_mem->last_buf_index % WAL_MEM_BUF_COUNT;
+		int rc = vclock_compare(&mem_buf->vclock, vclock);
+		if (rc != 0 && rc != -1)
+			break;
+	}
+	if (buf_index == wal_mem->first_buf_index)
+		return -1;
+	wal_mem_cursor->buf_index = buf_index - 1;
+	wal_mem_cursor->row_index = 0;
+	return 0;
+}
+
+int
+wal_mem_cursor_next(struct wal_mem *wal_mem,
+		    struct wal_mem_cursor *wal_mem_cursor,
+		    struct xrow_header **row,
+		    void **data,
+		    size_t *size)
+{
+	if (wal_mem->first_buf_index > wal_mem_cursor->buf_index) {
+		/* Buffer was discarded. */
+		return -1;
+	}
+
+	struct wal_mem_buf *mem_buf;
+	size_t last_row_index;
+
+next_buffer:
+	mem_buf = wal_mem->buf +
+		  wal_mem->last_buf_index % WAL_MEM_BUF_COUNT;
+	last_row_index = ibuf_used(&mem_buf->rows) /
+			 sizeof(struct wal_mem_buf_row);
+	if (last_row_index == wal_mem_cursor->row_index) {
+		/* No more rows in the current buffer. */
+		if (wal_mem->last_buf_index == wal_mem_cursor->buf_index)
+			/* No more rows in the memory. */
+			return 1;
+		wal_mem_cursor->row_index = 0;
+		++wal_mem_cursor->buf_index;
+		goto next_buffer;
+	}
+	struct wal_mem_buf_row *buf_row =
+		(struct wal_mem_buf_row *)mem_buf->rows.rpos +
+		wal_mem_cursor->row_index;
+	*row = &buf_row->xrow;
+	*data = buf_row->data;
+	*size = buf_row->size;
+	return 0;
+}

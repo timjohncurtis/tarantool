@@ -86,9 +86,9 @@ struct wal_mem_buf {
  */
 struct wal_mem {
 	/* An index of the first used buffer. */
-	uint32_t first_buf_index;
+	uint64_t first_buf_index;
 	/* An index of the last used buffer. */
-	uint32_t last_buf_index;
+	uint64_t last_buf_index;
 	/* A memory buffer array. */
 	struct wal_mem_buf buf[WAL_MEM_BUF_COUNT];
 	/* The first row index written in the current transaction. */
@@ -145,27 +145,22 @@ wal_mem_write(struct wal_mem *wal_mem, struct xrow_header **begin,
 /* Wal memory cursor to track a position in a wal memory. */
 struct wal_mem_cursor {
 	/* Current memory buffer index. */
-	uint32_t buf_index;
+	uint64_t buf_index;
 	/* Current row index. */
 	uint32_t row_index;
 };
 
 /* Create a wal memory cursor from the wal memory current position. */
-void
-wal_mem_cursor_create(struct wal_mem *wal_mem,
-		      struct wal_mem_cursor *wal_mem_cursor);
-
-/*
- * Move cursor forward to the end of current buffer and build iovec which
- * points on read data. If current buffer hasn't got data to read then cursor
- * swithes to the next one if it possible.
- * Return
- * count of build iovec items,
- * 0 there are no more data to read,
- * -1 in case of error.
- */
 int
-wal_mem_cursor_forward(struct wal_mem *wal_mem,
-		       struct wal_mem_cursor *wal_mem_cursor, struct iovec *iov);
+wal_mem_cursor_create(struct wal_mem *wal_mem,
+		      struct wal_mem_cursor *wal_mem_cursor,
+		      struct vclock *vclock);
+
+int
+wal_mem_cursor_next(struct wal_mem *wal_mem,
+		    struct wal_mem_cursor *wal_mem_cursor,
+		    struct xrow_header **row,
+		    void **data,
+		    size_t *size);
 
 #endif /* TARANTOOL_WAL_MEM_H_INCLUDED */
