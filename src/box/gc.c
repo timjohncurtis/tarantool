@@ -558,7 +558,9 @@ gc_consumer_register(const struct vclock *vclock, const char *format, ...)
 	va_start(ap, format);
 	vsnprintf(consumer->name, GC_NAME_MAX, format, ap);
 	va_end(ap);
-
+	vclock = vclockset_psearch(&gc.wal_dir.index, vclock);
+	if (vclock == NULL)
+		vclock = &replicaset.vclock;
 	vclock_copy(&consumer->vclock, vclock);
 	gc_tree_insert(&gc.consumers, consumer);
 	return consumer;
@@ -579,21 +581,20 @@ gc_consumer_advance(struct gc_consumer *consumer, const struct vclock *vclock)
 {
 	if (consumer->is_inactive)
 		return;
-
-	int64_t signature = vclock_sum(vclock);
-	int64_t prev_signature = vclock_sum(&consumer->vclock);
-
-	assert(signature >= prev_signature);
-	if (signature == prev_signature)
-		return; /* nothing to do */
-
+//	if (vclock_compare(vclock, &consumer->vclock) != 1)
+//		return;
+	int cmp = vclock_compare(vclock, &replicaset.vclock);
+	if (!gc.log_opened && (cmp == 0 || cmp == 1))
+		vclock = &replicaset.vclock;
+	else
+		vclock = vclockset_psearch(&gc.wal_dir.index, vclock);
 	/*
 	 * Do not update the tree unless the tree invariant
 	 * is violated.
 	 */
 	struct gc_consumer *next = gc_tree_next(&gc.consumers, consumer);
 	bool update_tree = (next != NULL &&
-			    signature >= vclock_sum(&next->vclock));
+			    vclock_sum(vclock) >= vclock_sum(&next->vclock));
 
 	if (update_tree)
 		gc_tree_remove(&gc.consumers, consumer);
