@@ -70,14 +70,6 @@ static void vy_task_complete_f(struct cmsg *);
 static void vy_deferred_delete_batch_process_f(struct cmsg *);
 static void vy_deferred_delete_batch_free_f(struct cmsg *);
 
-static const struct cmsg_hop vy_task_execute_route[] = {
-	{ vy_task_execute_f, NULL },
-};
-
-static const struct cmsg_hop vy_task_complete_route[] = {
-	{ vy_task_complete_f, NULL },
-};
-
 struct vy_task;
 
 /** Vinyl worker thread. */
@@ -96,8 +88,6 @@ struct vy_worker {
 	struct vy_task *task;
 	/** Link in vy_worker_pool::idle_workers. */
 	struct stailq_entry in_idle;
-	/** Route for sending deferred DELETEs back to tx. */
-	struct cmsg_hop deferred_delete_route[2];
 };
 
 /** Max number of statements in a batch of deferred DELETEs. */
@@ -349,12 +339,6 @@ vy_worker_pool_start(struct vy_worker_pool *pool)
 		worker->pool = pool;
 		cpipe_create(&worker->worker_pipe, name);
 		stailq_add_tail_entry(&pool->idle_workers, worker, in_idle);
-
-		struct cmsg_hop *route = worker->deferred_delete_route;
-		route[0].f = vy_deferred_delete_batch_process_f;
-		route[0].pipe = &worker->worker_pipe;
-		route[1].f = vy_deferred_delete_batch_free_f;
-		route[1].pipe = NULL;
 	}
 }
 
@@ -888,7 +872,7 @@ vy_deferred_delete_batch_process_f(struct cmsg *cmsg)
 	 * is in progress.
 	 */
 	if (pk->is_dropped)
-		return;
+		goto done;
 
 	struct space *deferred_delete_space;
 	deferred_delete_space = space_by_id(BOX_VINYL_DEFERRED_DELETE_ID);
@@ -909,6 +893,9 @@ vy_deferred_delete_batch_process_f(struct cmsg *cmsg)
 	if (txn_commit(txn) != 0)
 		goto fail;
 	fiber_gc();
+done:
+	cpipe_push(&task->worker->worker_pipe, vy_deferred_delete_batch_free_f,
+		   cmsg);
 	return;
 
 fail_rollback:
@@ -917,6 +904,7 @@ fail_rollback:
 fail:
 	batch->is_failed = true;
 	diag_move(diag_get(), &batch->diag);
+	goto done;
 }
 
 /**
@@ -970,8 +958,8 @@ vy_task_deferred_delete_flush(struct vy_task *task)
 	task->deferred_delete_batch = NULL;
 	task->deferred_delete_in_progress++;
 
-	cmsg_init(&batch->cmsg, worker->deferred_delete_route);
-	cpipe_push(&worker->tx_pipe, &batch->cmsg);
+	cpipe_push(&worker->tx_pipe, vy_deferred_delete_batch_process_f,
+		   &batch->cmsg);
 }
 
 /**
@@ -1731,8 +1719,7 @@ vy_task_f(va_list va)
 		task->is_failed = true;
 		diag_move(diag, &task->diag);
 	}
-	cmsg_init(&task->cmsg, vy_task_complete_route);
-	cpipe_push(&worker->tx_pipe, &task->cmsg);
+	cpipe_push(&worker->tx_pipe, vy_task_complete_f, &task->cmsg);
 	task->fiber = NULL;
 	worker->task = NULL;
 	return 0;
@@ -1757,8 +1744,7 @@ vy_task_execute_f(struct cmsg *cmsg)
 	if (task->fiber == NULL) {
 		task->is_failed = true;
 		diag_move(diag_get(), &task->diag);
-		cmsg_init(&task->cmsg, vy_task_complete_route);
-		cpipe_push(&worker->tx_pipe, &task->cmsg);
+		cpipe_push(&worker->tx_pipe, vy_task_complete_f, &task->cmsg);
 	} else {
 		worker->task = task;
 		fiber_start(task->fiber, task);
@@ -2011,8 +1997,7 @@ vy_scheduler_f(va_list va)
 		}
 
 		/* Queue the task for execution. */
-		cmsg_init(&task->cmsg, vy_task_execute_route);
-		cpipe_push(&task->worker->worker_pipe, &task->cmsg);
+		cpipe_push(&task->worker->worker_pipe, vy_task_execute_f, &task->cmsg);
 
 		fiber_reschedule();
 		continue;
