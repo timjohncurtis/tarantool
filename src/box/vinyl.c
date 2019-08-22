@@ -3511,7 +3511,7 @@ vinyl_iterator_primary_next(struct iterator *base, struct tuple **ret)
 {
 	double start_time = ev_monotonic_now(loop());
 
-	assert(base->next = vinyl_iterator_primary_next);
+	assert(base->next == vinyl_iterator_primary_next);
 	struct vinyl_iterator *it = (struct vinyl_iterator *)base;
 	struct vy_lsm *lsm = it->iterator.lsm;
 	assert(lsm->index_id == 0);
@@ -3549,7 +3549,7 @@ vinyl_iterator_secondary_next(struct iterator *base, struct tuple **ret)
 {
 	double start_time = ev_monotonic_now(loop());
 
-	assert(base->next = vinyl_iterator_secondary_next);
+	assert(base->next == vinyl_iterator_secondary_next);
 	struct vinyl_iterator *it = (struct vinyl_iterator *)base;
 	struct vy_lsm *lsm = it->iterator.lsm;
 	assert(lsm->index_id > 0);

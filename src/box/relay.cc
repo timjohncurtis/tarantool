@@ -64,6 +64,8 @@ struct relay_status_msg {
 	struct relay *relay;
 	/** Replica vclock. */
 	struct vclock vclock;
+	/** True if the message was processed. */
+	bool done;
 };
 
 /**
@@ -187,6 +189,7 @@ relay_new(struct replica *replica)
 	diag_create(&relay->diag);
 	stailq_create(&relay->pending_gc);
 	relay->state = RELAY_OFF;
+	relay->status_msg.done = true;
 	return relay;
 }
 
@@ -380,9 +383,11 @@ relay_final_join(int fd, uint64_t sync, struct vclock *start_vclock,
  * to the relay.
  */
 static void
-relay_status_update(struct cmsg *msg)
+relay_status_update(struct cmsg *base)
 {
-	msg->f = NULL;
+	struct relay_status_msg *msg =
+		container_of(base, struct relay_status_msg, msg);
+	msg->done = true;
 }
 
 /**
@@ -612,7 +617,7 @@ relay_subscribe_f(va_list ap)
 		 * Check that the vclock has been updated and the previous
 		 * status message is delivered
 		 */
-		if (relay->status_msg.msg.f != NULL)
+		if (!relay->status_msg.done)
 			continue;
 		struct vclock *send_vclock;
 		if (relay->version_id < version_id(1, 7, 4))
@@ -622,6 +627,7 @@ relay_subscribe_f(va_list ap)
 		if (vclock_sum(&relay->status_msg.vclock) ==
 		    vclock_sum(send_vclock))
 			continue;
+		relay->status_msg.done = false;
 		vclock_copy(&relay->status_msg.vclock, send_vclock);
 		relay->status_msg.relay = relay;
 		cpipe_push(&relay->tx_pipe, tx_status_update,

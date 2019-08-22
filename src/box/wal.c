@@ -150,6 +150,7 @@ struct wal_writer
 	 * queue, until the tx thread has recovered.
 	 */
 	struct cmsg in_rollback;
+	bool is_in_rollback;
 	/**
 	 * WAL watchers, i.e. threads that should be alerted
 	 * whenever there are new records appended to the journal.
@@ -203,12 +204,6 @@ wal_msg_create(struct wal_msg *batch)
 	stailq_create(&batch->commit);
 	stailq_create(&batch->rollback);
 	vclock_create(&batch->vclock);
-}
-
-static struct wal_msg *
-wal_msg(struct cmsg *msg)
-{
-	return msg->f == wal_write_to_disk ? (struct wal_msg *) msg : NULL;
 }
 
 /** Write a request to a log in a single transaction. */
@@ -361,7 +356,7 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 		writer->wal_dir.open_wflags |= O_SYNC;
 
 	stailq_create(&writer->rollback);
-	writer->in_rollback.f = NULL;
+	writer->is_in_rollback = false;
 
 	writer->checkpoint_wal_size = 0;
 	writer->checkpoint_threshold = INT64_MAX;
@@ -477,7 +472,7 @@ wal_init(enum wal_mode wal_mode, const char *wal_dirname, int64_t wal_max_rows,
 		return -1;
 
 	/* Create a pipe to WAL thread. */
-	cpipe_create(&writer->wal_pipe, "wal");
+	cpipe_create(&writer->wal_pipe, "wal", &cord()->slabc);
 	cpipe_set_max_input(&writer->wal_pipe, IOV_MAX);
 	return 0;
 }
@@ -527,7 +522,7 @@ wal_sync_f(struct cbus_call_msg *msg)
 {
 	(void)msg;
 	struct wal_writer *writer = &wal_writer_singleton;
-	if (writer->in_rollback.f != NULL) {
+	if (writer->is_in_rollback) {
 		/* We're rolling back a failed write. */
 		diag_set(ClientError, ER_WAL_IO);
 		return -1;
@@ -564,7 +559,7 @@ wal_begin_checkpoint_f(struct cbus_call_msg *data)
 {
 	struct wal_checkpoint *msg = (struct wal_checkpoint *) data;
 	struct wal_writer *writer = &wal_writer_singleton;
-	if (writer->in_rollback.f != NULL) {
+	if (writer->is_in_rollback) {
 		/*
 		 * We're rolling back a failed write and so
 		 * can't make a checkpoint - see the comment
@@ -889,7 +884,7 @@ wal_writer_end_rollback(struct cmsg *msg)
 {
 	(void) msg;
 	struct wal_writer *writer = &wal_writer_singleton;
-	writer->in_rollback.f = NULL;
+	writer->is_in_rollback = false;
 }
 
 static void
@@ -899,6 +894,7 @@ wal_writer_begin_rollback(struct wal_writer *writer)
 	 * Make sure the WAL writer rolls back
 	 * all input until rollback mode is off.
 	 */
+	writer->is_in_rollback = true;
 	cpipe_push(&writer->tx_prio_pipe, wal_writer_clear_bus_tx,
 		   &writer->in_rollback);
 }
@@ -948,7 +944,7 @@ wal_write_to_disk(struct cmsg *msg)
 
 	ERROR_INJECT_SLEEP(ERRINJ_WAL_DELAY);
 
-	if (writer->in_rollback.f != NULL) {
+	if (writer->is_in_rollback) {
 		/* We're rolling back a failed write. */
 		stailq_concat(&wal_msg->rollback, &wal_msg->commit);
 		vclock_copy(&wal_msg->vclock, &writer->vclock);
@@ -1096,7 +1092,7 @@ wal_writer_f(va_list ap)
 	 * endpoint, to ensure that WAL messages are delivered
 	 * even when tx fiber pool is used up by net messages.
 	 */
-	cpipe_create(&writer->tx_prio_pipe, "tx_prio");
+	cpipe_create(&writer->tx_prio_pipe, "tx_prio", &cord()->slabc);
 
 	cbus_loop(&endpoint);
 
@@ -1123,7 +1119,7 @@ wal_writer_f(va_list ap)
 	if (xlog_is_open(&vy_log_writer.xlog))
 		xlog_close(&vy_log_writer.xlog, false);
 
-	cpipe_destroy(&writer->tx_prio_pipe);
+	//cpipe_destroy(&writer->tx_prio_pipe);
 	return 0;
 }
 
@@ -1155,12 +1151,12 @@ wal_write(struct journal *journal, struct journal_entry *entry)
 	}
 
 	struct wal_msg *batch;
-	if (!stailq_empty(&writer->wal_pipe.input) &&
+/*	if (!stailq_empty(&writer->wal_pipe.input) &&
 	    (batch = wal_msg(stailq_first_entry(&writer->wal_pipe.input,
 						struct cmsg, fifo)))) {
 
 		stailq_add_tail_entry(&batch->commit, entry, fifo);
-	} else {
+	} else*/ {
 		batch = (struct wal_msg *)mempool_alloc(&writer->msg_pool);
 		if (batch == NULL) {
 			diag_set(OutOfMemory, sizeof(struct wal_msg),
@@ -1278,7 +1274,7 @@ wal_watcher_notify(struct wal_watcher *watcher, unsigned events)
 	assert(!rlist_empty(&watcher->next));
 
 	struct wal_watcher_msg *msg = &watcher->msg;
-	if (msg->cmsg.f != NULL) {
+	if (msg->in_progress) {
 		/*
 		 * If the notification message is still en route,
 		 * mark the watcher to resend it as soon as it
@@ -1288,6 +1284,7 @@ wal_watcher_notify(struct wal_watcher *watcher, unsigned events)
 		return;
 	}
 
+	msg->in_progress = true;
 	msg->events = events;
 	cpipe_push(&watcher->watcher_pipe, wal_watcher_notify_perform,
 		   &msg->cmsg);
@@ -1313,7 +1310,7 @@ wal_watcher_notify_complete(struct cmsg *cmsg)
 	struct wal_watcher_msg *msg = (struct wal_watcher_msg *) cmsg;
 	struct wal_watcher *watcher = msg->watcher;
 
-	cmsg->f = NULL;
+	msg->in_progress = false;
 
 	if (rlist_empty(&watcher->next)) {
 		/* The watcher is about to be destroyed. */
@@ -1366,7 +1363,7 @@ wal_set_watcher(struct wal_watcher *watcher, const char *name,
 	watcher->cb = watcher_cb;
 	watcher->msg.watcher = watcher;
 	watcher->msg.events = 0;
-	watcher->msg.cmsg.f = NULL;
+	watcher->msg.in_progress = false;
 	watcher->pending_events = 0;
 	cbus_pair("wal", name, &watcher->wal_pipe, &watcher->watcher_pipe,
 		  wal_watcher_attach, watcher, process_cb);
