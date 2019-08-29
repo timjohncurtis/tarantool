@@ -408,50 +408,6 @@ cbus_call(struct cpipe *callee, struct cpipe *caller, struct cbus_call_msg *msg,
 	return rc;
 }
 
-struct cbus_flush_msg {
-	struct cmsg cmsg;
-	struct cpipe *caller_pipe;
-	bool complete;
-	struct fiber_cond cond;
-};
-
-static void
-cbus_flush_complete(struct cmsg *cmsg)
-{
-	struct cbus_flush_msg *msg = container_of(cmsg,
-			struct cbus_flush_msg, cmsg);
-	msg->complete = true;
-	fiber_cond_signal(&msg->cond);
-}
-
-static void
-cbus_flush_perform(struct cmsg *cmsg)
-{
-	struct cbus_flush_msg *msg = container_of(cmsg, struct cbus_flush_msg,
-						  cmsg);
-	cpipe_push(msg->caller_pipe, cbus_flush_complete, cmsg);
-}
-
-void
-cbus_flush(struct cpipe *callee, struct cpipe *caller,
-	   void (*process_cb)(struct cbus_endpoint *endpoint))
-{
-	struct cbus_flush_msg msg;
-	msg.caller_pipe = caller;
-	msg.complete = false;
-	fiber_cond_create(&msg.cond);
-
-	cpipe_push(callee, cbus_flush_perform, &msg.cmsg);
-
-	while (true) {
-		if (process_cb != NULL)
-			process_cb(caller->endpoint);
-		if (msg.complete)
-			break;
-		fiber_cond_wait(&msg.cond);
-	}
-}
-
 struct cbus_pair_msg {
 	struct cmsg cmsg;
 	void (*pair_cb)(void *);

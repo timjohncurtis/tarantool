@@ -352,15 +352,6 @@ cbus_call(struct cpipe *callee, struct cpipe *caller,
 	  cbus_call_f func, cbus_call_f free_cb, double timeout);
 
 /**
- * Block until all messages queued in a pipe have been processed.
- * Done by submitting a dummy message to the pipe and waiting
- * until it is complete.
- */
-void
-cbus_flush(struct cpipe *callee, struct cpipe *caller,
-	   void (*process_cb)(struct cbus_endpoint *));
-
-/**
  * Create a two-way channel between existing cbus endpoints.
  * Blocks until both pipes are created.
  *
