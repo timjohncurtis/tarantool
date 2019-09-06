@@ -283,3 +283,100 @@ error:
 	return -1;
 }
 
+/*
+ * Returns an index of the first row after given vclock
+ * in a chunk.
+ */
+static int
+xrow_buf_chunk_locate_vclock(struct xrow_buf_chunk *chunk,
+			     struct vclock *vclock)
+{
+	for (uint32_t row_index = 0; row_index < chunk->row_count;
+	     ++row_index) {
+		struct xrow_header *row = &chunk->row_info[row_index].xrow;
+		if (vclock_get(vclock, row->replica_id) < row->lsn)
+			return row_index;
+	}
+	/*
+	 * We did not find any row with vclock not less than
+	 * given one so return an index just after the last one.
+	 */
+	return chunk->row_count;
+}
+
+int
+xrow_buf_cursor_create(struct xrow_buf *xrow_buf,
+		       struct xrow_buf_cursor *xrow_buf_cursor,
+		       struct vclock *vclock)
+{
+	/* Check if a buffer has requested data. */
+	struct xrow_buf_chunk *chunk =
+			xrow_buf->chunk + xrow_buf->first_chunk_index %
+					  XROW_BUF_CHUNK_COUNT;
+	int rc = vclock_compare(&chunk->vclock, vclock);
+	if (rc >= 0 || rc == VCLOCK_ORDER_UNDEFINED) {
+		/* The requested data was discarded. */
+		return -1;
+	}
+	uint32_t index = xrow_buf->first_chunk_index;
+	while (index < xrow_buf->last_chunk_index) {
+		chunk = xrow_buf->chunk + (index + 1) % XROW_BUF_CHUNK_COUNT;
+		int rc = vclock_compare(&chunk->vclock, vclock);
+		if (rc > 0 || rc == VCLOCK_ORDER_UNDEFINED) {
+			/* Next chunk has younger rows than requested vclock. */
+			break;
+		}
+		++index;
+	}
+	chunk = xrow_buf->chunk + (index) % XROW_BUF_CHUNK_COUNT;
+	xrow_buf_cursor->chunk_index = index;
+	xrow_buf_cursor->row_index = xrow_buf_chunk_locate_vclock(chunk, vclock);
+	return 0;
+}
+
+int
+xrow_buf_cursor_next(struct xrow_buf *xrow_buf,
+		     struct xrow_buf_cursor *xrow_buf_cursor,
+		     struct xrow_header **row, void **data, size_t *size)
+{
+	if (xrow_buf->first_chunk_index > xrow_buf_cursor->chunk_index) {
+		/* A cursor current chunk was discarded by a buffer. */
+		return -1;
+	}
+
+	struct xrow_buf_chunk *chunk;
+next_chunk:
+	chunk = xrow_buf->chunk + xrow_buf_cursor->chunk_index %
+				  XROW_BUF_CHUNK_COUNT;
+	size_t chunk_row_count = chunk->row_count;
+	if (chunk_row_count == xrow_buf_cursor->row_index) {
+		/*
+		 * No more rows in a buffer but there are two
+		 * possibilities:
+		 *  1. A cursor current chunk is the last one and there is
+		 * no more rows in the cursor.
+		 *  2. There is a chunk after the current one
+		 * so we can switch to it.
+		 * */
+		if (xrow_buf->last_chunk_index ==
+		    xrow_buf_cursor->chunk_index) {
+			/*
+			 * The current chunk is the last one -
+			 * no more rows in a buffer.
+			 */
+			return 1;
+		}
+		/* Switch to the next chunk. */
+		xrow_buf_cursor->row_index = 0;
+		++xrow_buf_cursor->chunk_index;
+		goto next_chunk;
+	}
+	/* Return row header and data pointers and data size. */
+	struct xrow_buf_row_info *row_info = chunk->row_info +
+					     xrow_buf_cursor->row_index;
+	*row = &row_info->xrow;
+	*data = row_info->data;
+	*size = row_info->size;
+	++xrow_buf_cursor->row_index;
+	return 0;
+}

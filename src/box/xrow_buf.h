@@ -157,4 +157,42 @@ xrow_buf_write(struct xrow_buf *xrow_buf, struct xrow_header **begin,
 	       struct xrow_header **end,
 	       struct iovec **iovec);
 
+/**
+ * Xrow buffer cursor used to search a position in a buffer
+ * and then fetch rows one by one from the postion toward the
+ * buffer last append row.
+ */
+struct xrow_buf_cursor {
+	/** Current chunk global index. */
+	uint32_t chunk_index;
+	/** Row index in the current chunk. */
+	uint32_t row_index;
+};
+
+/**
+ * Create a xrow buffer cursor and set it's position to
+ * the first row after passed vclock value.
+ *
+ * @retval 0 cursor was created
+ * @retval -1 if a vclock was discarded
+ */
+int
+xrow_buf_cursor_create(struct xrow_buf *xrow_buf,
+		       struct xrow_buf_cursor *xrow_buf_cursor,
+		       struct vclock *vclock);
+
+/**
+ * Fetch next row from a xrow buffer cursor and return the row
+ * header and encoded data pointers as well as encoded data size
+ * in the corresponding parameters.
+ *
+ * @retval 0 in case of success
+ * @retval 1 if there is no more rows in a buffer
+ * @retval -1 if this cursor postion was discarded by xrow buffer
+ */
+int
+xrow_buf_cursor_next(struct xrow_buf *xrow_buf,
+		     struct xrow_buf_cursor *xrow_buf_cursor,
+		     struct xrow_header **row, void **data, size_t *size);
+
 #endif /* TARANTOOL_XROW_BUF_H_INCLUDED */
