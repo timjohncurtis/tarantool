@@ -200,3 +200,81 @@ error:
 	obuf_rollback_to_svp(&chunk->data, &data_svp);
 	return -1;
 }
+
+/*
+ * Returns an index of the first row after given vclock in a
+ * chunk.
+ */
+static int
+xrow_buf_chunk_locate_vclock(struct xrow_buf_chunk *chunk,
+			     const struct vclock *vclock)
+{
+	struct xrow_buf_row_info *info = chunk->row_info;
+	for (size_t row_index = 0; row_index < chunk->row_count;
+	     ++row_index, ++info) {
+		struct xrow_header *row = &info->xrow;
+		if (vclock_get(vclock, row->replica_id) < row->lsn)
+			return row_index;
+	}
+	return chunk->row_count;
+}
+
+int
+xrow_buf_cursor_create(struct xrow_buf *buf, struct xrow_buf_cursor *cursor,
+		       const struct vclock *vclock)
+{
+	struct xrow_buf_chunk *chunk =
+		buf->chunk + buf->first_chunk_index % XROW_BUF_CHUNK_COUNT;
+	int rc = vclock_compare(&chunk->vclock, vclock);
+	if (rc >= 0 || rc == VCLOCK_ORDER_UNDEFINED) {
+		/* The requested data was discarded. */
+		return -1;
+	}
+	uint32_t index = buf->first_chunk_index;
+	for (; index < buf->last_chunk_index; ++index) {
+		chunk = buf->chunk + (index + 1) % XROW_BUF_CHUNK_COUNT;
+		rc = vclock_compare(&chunk->vclock, vclock);
+		if (rc > 0 || rc == VCLOCK_ORDER_UNDEFINED) {
+			/*
+			 * Next chunk has younger rows than
+			 * requested vclock.
+			 */
+			break;
+		}
+	}
+	chunk = buf->chunk + index % XROW_BUF_CHUNK_COUNT;
+	cursor->buf = buf;
+	cursor->chunk_index = index;
+	cursor->row_index = xrow_buf_chunk_locate_vclock(chunk, vclock);
+	return 0;
+}
+
+int
+xrow_buf_cursor_next(struct xrow_buf_cursor *cursor, struct xrow_header **row)
+{
+	struct xrow_buf *buf = cursor->buf;
+	if (buf->first_chunk_index > cursor->chunk_index) {
+		/* A cursor current chunk was discarded. */
+		return -1;
+	}
+	struct xrow_buf_chunk *chunk;
+	while (true) {
+		chunk = buf->chunk + cursor->chunk_index % XROW_BUF_CHUNK_COUNT;
+		size_t row_count = chunk->row_count;
+		if (row_count > cursor->row_index)
+			break;
+		if (buf->last_chunk_index == cursor->chunk_index) {
+			/*
+			 * The current chunk is last - no more
+			 * rows in the buffer.
+			 */
+			return 1;
+		}
+		/* Switch to the next chunk. */
+		cursor->row_index = 0;
+		++cursor->chunk_index;
+	}
+	*row = &chunk->row_info[cursor->row_index].xrow;
+	++cursor->row_index;
+	return 0;
+}

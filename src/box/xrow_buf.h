@@ -147,3 +147,43 @@ xrow_buf_tx_commit(struct xrow_buf *buf);
 int
 xrow_buf_write_row(struct xrow_buf *buf, struct xrow_header *row,
 		   struct iovec *iov);
+
+/**
+ * Xrow buffer cursor used to find a position in an xrow buffer,
+ * and then fetch rows one by one from there.
+ */
+struct xrow_buf_cursor {
+	/** Source buffer. */
+	struct xrow_buf *buf;
+	/** Current chunk global index. */
+	uint32_t chunk_index;
+	/** Row index in the current chunk. */
+	uint32_t row_index;
+};
+
+/**
+ * Create an xrow buffer cursor and set it's position to the first
+ * row after passed vclock value.
+ * @retval 0 Success.
+ * @retval -1 The needed vclock was already dropped from the
+ *        buffer. It happens, when WAL writes rows faster than
+ *        their consumer opens cursors and reads data.
+ */
+int
+xrow_buf_cursor_create(struct xrow_buf *buf, struct xrow_buf_cursor *cursor,
+		       const struct vclock *vclock);
+
+/**
+ * Get a next xrow from the buffer.
+ *
+ * @param cursor Cursor to fetch a row from.
+ * @param[out] row Result xrow. It is NULL in case no more rows in
+ *        the buffer.
+ *
+ * @retval 0 Success.
+ * @retval -1 The needed vclock was already dropped from the
+ *        buffer. It happens, when WAL writes rows faster than
+ *        their consumer opens cursors and reads data.
+ */
+int
+xrow_buf_cursor_next(struct xrow_buf_cursor *cursor, struct xrow_header **row);
