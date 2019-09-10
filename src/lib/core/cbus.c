@@ -547,6 +547,7 @@ struct cbus_unpair_msg {
 	void (*unpair_cb)(void *);
 	void *unpair_arg;
 	struct cpipe *src_pipe;
+	struct cpipe *dest_pipe;
 	bool complete;
 	struct fiber_cond cond;
 };
@@ -579,7 +580,7 @@ cbus_unpair_perform(struct cmsg *cmsg)
 	};
 	cmsg_init(cmsg, route);
 	cpipe_push(msg->src_pipe, cmsg);
-	cpipe_destroy(msg->src_pipe);
+	cpipe_destroy(msg->dest_pipe);
 }
 
 static void
@@ -607,6 +608,7 @@ cbus_unpair(struct cpipe *dest_pipe, struct cpipe *src_pipe,
 	msg.unpair_cb = unpair_cb;
 	msg.unpair_arg = unpair_arg;
 	msg.src_pipe = src_pipe;
+	msg.dest_pipe = dest_pipe;
 	msg.complete = false;
 	fiber_cond_create(&msg.cond);
 
@@ -621,7 +623,7 @@ cbus_unpair(struct cpipe *dest_pipe, struct cpipe *src_pipe,
 		fiber_cond_wait(&msg.cond);
 	}
 
-	cpipe_destroy(dest_pipe);
+	cpipe_destroy(src_pipe);
 }
 
 void
