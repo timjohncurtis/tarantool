@@ -165,6 +165,8 @@ struct wal_writer
 	 * without xlog files access.
 	 */
 	struct xrow_buf xrow_buf;
+	/* xrow buffer condition signaled when buffer write was done. */
+	struct fiber_cond xrow_buf_cond;
 };
 
 struct wal_msg {
@@ -1075,6 +1077,7 @@ wal_write_to_disk(struct cmsg *msg)
 	writer->checkpoint_wal_size += rc;
 	last_committed = stailq_last(&wal_msg->commit);
 	vclock_merge(&writer->vclock, &vclock_diff);
+	fiber_cond_broadcast(&writer->xrow_buf_cond);
 
 	/*
 	 * Notify TX if the checkpoint threshold has been exceeded.
@@ -1140,6 +1143,7 @@ wal_writer_f(va_list ap)
 	(void) ap;
 	struct wal_writer *writer = &wal_writer_singleton;
 	xrow_buf_create(&writer->xrow_buf);
+	fiber_cond_create(&writer->xrow_buf_cond);
 
 	/** Initialize eio in this thread */
 	coio_enable();
@@ -1459,4 +1463,158 @@ wal_atfork()
 		xlog_atfork(&wal_writer_singleton.current_wal);
 	if (xlog_is_open(&vy_log_writer.xlog))
 		xlog_atfork(&vy_log_writer.xlog);
+}
+
+/* Wake relay when wal_relay finished. */
+static void
+wal_relay_done(struct cmsg *base)
+{
+	struct wal_relay *msg =
+		container_of(base, struct wal_relay, base);
+	msg->done = true;
+	fiber_cond_signal(&msg->done_cond);
+}
+
+/* Wal relay fiber function. */
+static int
+wal_relay_f(va_list ap)
+{
+	struct wal_writer *writer = &wal_writer_singleton;
+	struct wal_relay *msg = va_arg(ap, struct wal_relay *);
+	struct vclock *vclock = msg->vclock;
+	wal_relay_cb on_wal_relay = msg->on_wal_relay;
+	void *cb_data = msg->cb_data;
+
+	double last_row_time = ev_monotonic_now(loop());
+
+
+	struct xrow_buf_cursor cursor;
+	if (xrow_buf_cursor_create(&writer->xrow_buf, &cursor, vclock) != 0)
+		goto done;
+	/* Cursor was created and then we can process rows one by one. */
+	while (!fiber_is_cancelled()) {
+		struct xrow_header *row;
+		void *data;
+		size_t size;
+		int rc = xrow_buf_cursor_next(&writer->xrow_buf, &cursor,
+					     &row, &data, &size);
+		if (rc < 0) {
+			/*
+			 * Wal memory buffer was rotated and we are not in
+			 * memory.
+			 */
+			goto done;
+		}
+		if (rc > 0) {
+			/*
+			 * There are no more rows in a buffer. Wait
+			 * until wal wrote new ones or timeout was
+			 * exceeded and send a heartbeat message.
+			 */
+			double timeout = replication_timeout;
+			struct errinj *inj = errinj(ERRINJ_RELAY_REPORT_INTERVAL,
+						    ERRINJ_DOUBLE);
+			if (inj != NULL && inj->dparam != 0)
+				timeout = inj->dparam;
+
+			fiber_cond_wait_deadline(&writer->xrow_buf_cond,
+						 last_row_time + timeout);
+			if (ev_monotonic_now(loop()) - last_row_time >
+			    timeout) {
+				/* Timeout was exceeded - send a heartbeat. */
+				struct xrow_header hearth_beat;
+				xrow_encode_timestamp(&hearth_beat, instance_id,
+						      ev_now(loop()));
+				last_row_time = ev_monotonic_now(loop());
+				if (on_wal_relay(&hearth_beat, cb_data) != 0) {
+					diag_move(&fiber()->diag, &msg->diag);
+					goto done;
+				}
+			}
+			continue;
+		}
+		ERROR_INJECT(ERRINJ_WAL_MEM_IGNORE, goto done; );
+		last_row_time = ev_monotonic_now(loop());
+		if (on_wal_relay(row, cb_data) != 0) {
+			diag_move(&fiber()->diag, &msg->diag);
+			goto done;
+		}
+	}
+	static struct cmsg_hop done_route[] = {
+		{wal_relay_done, NULL}
+	};
+done:
+	cmsg_init(&msg->base, done_route);
+	cpipe_push(&msg->relay_pipe, &msg->base);
+	msg->fiber = NULL;
+	return 0;
+}
+
+static void
+wal_relay_attach(void *data)
+{
+	struct wal_relay *msg = (struct wal_relay *)data;
+	msg->fiber = fiber_new("wal relay fiber", wal_relay_f);
+	fiber_start(msg->fiber, msg);
+}
+
+static void
+wal_relay_cancel(struct cmsg *base)
+{
+	struct wal_relay *msg = container_of(base, struct wal_relay,
+						 cancel_msg);
+	/*
+	 * A relay was cancelled so cancel corresponding
+	 * fiber in the wal thread if it still alive.
+	 */
+	if (msg->fiber != NULL)
+		fiber_cancel(msg->fiber);
+}
+
+int
+wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
+	  wal_relay_cb on_wal_relay, void *cb_data, const char *endpoint_name)
+{
+	wal_relay->vclock = vclock;
+	wal_relay->on_wal_relay = on_wal_relay;
+	wal_relay->cb_data = cb_data;
+	diag_create(&wal_relay->diag);
+	wal_relay->cancel_msg.route = NULL;
+
+	fiber_cond_create(&wal_relay->done_cond);
+	wal_relay->done = false;
+
+	cbus_pair("wal", endpoint_name, &wal_relay->wal_pipe,
+		  &wal_relay->relay_pipe,
+		  wal_relay_attach, wal_relay, cbus_process);
+
+	/*
+	 * We do not use cbus_call because we should be able to
+	 * process this fiber cancelation and send a cancel request
+	 * to the wal cord to force wal datach.
+	 */
+	while (!wal_relay->done) {
+		if (fiber_is_cancelled() &&
+		    wal_relay->cancel_msg.route == NULL) {
+			/* Send a cancel message to a wal relay fiber. */
+			static struct cmsg_hop cancel_route[]= {
+				{wal_relay_cancel, NULL}};
+			cmsg_init(&wal_relay->cancel_msg, cancel_route);
+			cpipe_push(&wal_relay->wal_pipe, &wal_relay->cancel_msg);
+		}
+		fiber_cond_wait(&wal_relay->done_cond);
+	}
+
+	cbus_unpair(&wal_relay->wal_pipe, &wal_relay->relay_pipe,
+		    NULL, NULL, cbus_process);
+
+	if (!diag_is_empty(&wal_relay->diag)) {
+		diag_move(&wal_relay->diag, &fiber()->diag);
+		return -1;
+	}
+	if (fiber_is_cancelled()) {
+		diag_set(FiberIsCancelled);
+		return -1;
+	}
+	return 0;
 }
