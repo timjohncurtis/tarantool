@@ -57,6 +57,7 @@
 #include "engine.h"		/* engine_collect_garbage() */
 #include "wal.h"		/* wal_collect_garbage() */
 #include "checkpoint_schedule.h"
+#include "replication.h"
 
 struct gc_state gc;
 
@@ -72,9 +73,9 @@ gc_checkpoint_fiber_f(va_list);
 static inline int
 gc_consumer_cmp(const struct gc_consumer *a, const struct gc_consumer *b)
 {
-	if (vclock_sum(&a->vclock) < vclock_sum(&b->vclock))
+	if (vclock_get(&a->vclock, instance_id) < vclock_get(&b->vclock, instance_id))
 		return -1;
-	if (vclock_sum(&a->vclock) > vclock_sum(&b->vclock))
+	if (vclock_get(&a->vclock, instance_id) > vclock_get(&b->vclock, instance_id))
 		return 1;
 	if ((intptr_t)a < (intptr_t)b)
 		return -1;
@@ -562,7 +563,7 @@ gc_consumer_advance(struct gc_consumer *consumer, const struct vclock *vclock)
 	 */
 	struct gc_consumer *next = gc_tree_next(&gc.consumers, consumer);
 	bool update_tree = (next != NULL &&
-			    signature >= vclock_sum(&next->vclock));
+			    vclock_get(vclock, instance_id) >= vclock_get(&next->vclock, instance_id));
 
 	if (update_tree)
 		gc_tree_remove(&gc.consumers, consumer);
