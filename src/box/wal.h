@@ -250,6 +250,66 @@ wal_write_vy_log(struct journal_entry *req);
 void
 wal_rotate_vy_log();
 
+typedef int (*wal_relay_cb)(struct xrow_header *header, void *data);
+
+/**
+ * Wal relay maintains wal memory tracking and allows
+ * to retrieve logged xrows direct from the wal memory.
+ */
+struct wal_relay {
+	struct cmsg base;
+	/** Cbus pipe to wal cord. */
+	struct cpipe wal_pipe;
+	/** Cbus pipe from wal cord. */
+	struct cpipe relay_pipe;
+
+	/** Vclock to start relaying. */
+	struct vclock *vclock;
+	/** Callback to call for each row. */
+	wal_relay_cb on_wal_relay;
+	/** Pointer param to use with the callback. */
+	void *cb_data;
+	/**
+	 * A fiber created in a wal tread. This fiber fetches
+	 * rows one by one from the wal memory and/or watches
+	 * for new logged data.
+	 */
+	struct fiber *fiber;
+	/* Message to cancel relaying fiber. */
+	struct cmsg cancel_msg;
+	/* Fiber condition to wait until relaying was stopped. */
+	struct fiber_cond done_cond;
+	/* Turns to true when relaying was stopped. */
+	bool done;
+	/* Return code. */
+	int rc;
+	/* Diagnostic area. */
+	struct diag diag;
+};
+
+/**
+ * A function to start fetching rows direct from wal memory buffer.
+ * This function initiates connection with a wal and starts
+ * a fiber which handles wal memory cursor and yields until
+ * the fiber exited because of the cursor was outdated or a
+ * row sending error. When a fiber called this function was
+ * cancelled then special cancel message will be send in order
+ * to stop relaying fiber.
+ *
+ * @param wal_relay a wal relay structure to put all temporay
+ * values in
+ * @param vclock a vclock to start relaying from
+ * @param on_wal_relay a callback to call for every fetched row
+ * @param cb_data a pointer to pass into the callback
+ * @endpoint_name a relay endpoint name to estables cbus connection
+ *
+ * @retval 0 relaying was finished because of cursor is our of date
+ * @retval -1 relaying was finished because of an error.
+ */
+int
+wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
+	  wal_relay_cb on_wal_relay, void *cb_data, const char *endpoint_name);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
