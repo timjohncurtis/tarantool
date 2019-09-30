@@ -1645,6 +1645,7 @@ void
 box_process_vote(struct ballot *ballot)
 {
 	ballot->is_ro = cfg_geti("read_only") != 0;
+	ballot->is_orphan = is_ro || is_orphan;
 	vclock_copy(&ballot->vclock, &replicaset.vclock);
 	vclock_copy(&ballot->gc_vclock, &gc.vclock);
 }
