@@ -307,9 +307,11 @@ applier_connect(struct applier *applier)
 	 */
 	applier->addr_len = sizeof(applier->addrstorage);
 	applier_set_state(applier, APPLIER_CONNECT);
-	coio_connect(coio, uri, &applier->addr, &applier->addr_len);
+	if (coio_connect(coio, uri, &applier->addr, &applier->addr_len) != 0)
+		diag_raise();
 	assert(coio->fd >= 0);
-	coio_readn(coio, greetingbuf, IPROTO_GREETING_SIZE);
+	if (coio_readn(coio, greetingbuf, IPROTO_GREETING_SIZE) < 0)
+		diag_raise();
 	applier->last_row_time = ev_monotonic_now(loop());
 
 	/* Decode instance version and name from greeting */
@@ -344,8 +346,9 @@ applier_connect(struct applier *applier)
 	 * election on bootstrap.
 	 */
 	xrow_encode_vote(&row);
-	coio_write_xrow(coio, &row);
-	coio_read_xrow(coio, ibuf, &row);
+	if (coio_write_xrow(coio, &row) < 0 ||
+	    coio_read_xrow(coio, ibuf, &row) < 0)
+		diag_raise();
 	if (row.type == IPROTO_OK) {
 		xrow_decode_ballot_xc(&row, &applier->ballot);
 	} else try {
@@ -373,8 +376,9 @@ applier_connect(struct applier *applier)
 	applier_set_state(applier, APPLIER_AUTH);
 	xrow_encode_auth_xc(&row, greeting.salt, greeting.salt_len, uri->login,
 			    uri->login_len, uri->password, uri->password_len);
-	coio_write_xrow(coio, &row);
-	coio_read_xrow(coio, ibuf, &row);
+	if (coio_write_xrow(coio, &row) < 0 ||
+	    coio_read_xrow(coio, ibuf, &row) < 0)
+		diag_raise();
 	applier->last_row_time = ev_monotonic_now(loop());
 	if (row.type != IPROTO_OK)
 		xrow_decode_error_xc(&row); /* auth failed */
@@ -404,7 +408,8 @@ applier_join(struct applier *applier)
 	 */
 	if (applier->version_id >= version_id(1, 7, 0)) {
 		/* Decode JOIN response */
-		coio_read_xrow(coio, ibuf, &row);
+		if (coio_read_xrow(coio, ibuf, &row) < 0)
+			diag_raise();
 		if (iproto_type_is_error(row.type)) {
 			xrow_decode_error_xc(&row); /* re-throw error */
 		} else if (row.type != IPROTO_OK) {
@@ -427,7 +432,8 @@ applier_join(struct applier *applier)
 	 */
 	uint64_t row_count = 0;
 	while (true) {
-		coio_read_xrow(coio, ibuf, &row);
+		if (coio_read_xrow(coio, ibuf, &row) < 0)
+			diag_raise();
 		applier->last_row_time = ev_monotonic_now(loop());
 		if (iproto_type_is_dml(row.type)) {
 			if (apply_initial_join_row(&row) != 0)
@@ -469,7 +475,8 @@ applier_join(struct applier *applier)
 	 * Receive final data.
 	 */
 	while (true) {
-		coio_read_xrow(coio, ibuf, &row);
+		if (coio_read_xrow(coio, ibuf, &row) < 0)
+			diag_raise();
 		applier->last_row_time = ev_monotonic_now(loop());
 		if (iproto_type_is_dml(row.type)) {
 			vclock_follow_xrow(&replicaset.vclock, &row);
@@ -528,10 +535,13 @@ applier_read_tx_row(struct applier *applier)
 	 * from the master for quite a while the connection is
 	 * broken - the master might just be idle.
 	 */
-	if (applier->version_id < version_id(1, 7, 7))
-		coio_read_xrow(coio, ibuf, row);
-	else
-		coio_read_xrow_timeout_xc(coio, ibuf, row, timeout);
+	if (applier->version_id < version_id(1, 7, 7)) {
+		if (coio_read_xrow(coio, ibuf, row) < 0)
+			diag_raise();
+	} else {
+		if (coio_read_xrow_timeout(coio, ibuf, row, timeout) < 0)
+			diag_raise();
+	}
 
 	applier->lag = ev_now(loop()) - row->tm;
 	applier->last_row_time = ev_monotonic_now(loop());
@@ -791,7 +801,8 @@ applier_subscribe(struct applier *applier)
 
 	/* Read SUBSCRIBE response */
 	if (applier->version_id >= version_id(1, 6, 7)) {
-		coio_read_xrow(coio, ibuf, &row);
+		if (coio_read_xrow(coio, ibuf, &row) < 0)
+			diag_raise();
 		if (iproto_type_is_error(row.type)) {
 			xrow_decode_error_xc(&row);  /* error */
 		} else if (row.type != IPROTO_OK) {

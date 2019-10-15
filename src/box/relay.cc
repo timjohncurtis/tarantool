@@ -374,8 +374,9 @@ relay_reader_f(va_list ap)
 	try {
 		while (!fiber_is_cancelled()) {
 			struct xrow_header xrow;
-			coio_read_xrow_timeout_xc(&io, &ibuf, &xrow,
-					replication_disconnect_timeout());
+			if (coio_read_xrow_timeout(&io, &ibuf, &xrow,
+					replication_disconnect_timeout()) < 0)
+				diag_raise();
 			/* vclock is followed while decoding, zeroing it. */
 			vclock_create(&relay->recv_vclock);
 			xrow_decode_vclock_xc(&xrow, &relay->recv_vclock);
@@ -538,7 +539,8 @@ relay_send(struct relay *relay, struct xrow_header *packet)
 
 	packet->sync = relay->sync;
 	relay->last_row_time = ev_monotonic_now(loop());
-	coio_write_xrow(&relay->io, packet);
+	if (coio_write_xrow(&relay->io, packet) < 0)
+		diag_raise();
 	fiber_gc();
 
 	struct errinj *inj = errinj(ERRINJ_RELAY_TIMEOUT, ERRINJ_DOUBLE);

@@ -59,10 +59,6 @@ coio_connect(struct ev_io *coio, struct uri *uri, struct sockaddr *addr,
 	return coio_connect_timeout(coio, uri, addr, addr_len, TIMEOUT_INFINITY);
 }
 
-void
-coio_bind(struct ev_io *coio, struct sockaddr *addr,
-	  socklen_t addrlen);
-
 int
 coio_accept(struct ev_io *coio, struct sockaddr *addr, socklen_t addrlen,
 	    ev_tstamp timeout);
@@ -164,7 +160,7 @@ coio_service_init(struct coio_service *service, const char *name,
 		  fiber_func handler, void *handler_param);
 
 /** Wait until the service binds to the port. */
-void
+int
 coio_service_start(struct evio_service *service, const char *uri);
 
 void
