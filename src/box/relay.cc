@@ -425,18 +425,6 @@ relay_send_heartbeat(struct relay *relay)
 	}
 }
 
-static int
-relay_send_cb(struct xrow_header *row, void *data)
-{
-	try {
-		struct relay *relay = (struct relay *)data;
-		relay_send_row(&relay->stream, row);
-	} catch (Exception *e) {
-		return -1;
-	}
-	return 0;
-}
-
 static void
 relay_endpoint_cb(struct ev_loop *loop, ev_watcher *watcher, int events)
 {
@@ -483,27 +471,10 @@ relay_subscribe_f(va_list ap)
 	while (!fiber_is_cancelled()) {
 		/* Try to relay direct from wal memory buffer. */
 		if (wal_relay(&relay->wal_relay, &relay->relay_vclock,
-			      relay_send_cb, relay,
-			      tt_sprintf("relay_%p", relay)) != 0) {
+			      &relay->stream, tt_sprintf("relay_%p", relay)) != 0) {
 			relay_set_error(relay, diag_last_error(&fiber()->diag));
 			break;
 		};
-		/* Recover xlogs from files. */
-		relay->r = recovery_new(relay->wal_dir, false,
-				        &relay->relay_vclock);
-		if (relay->r == NULL) {
-			relay_set_error(relay, diag_last_error(diag_get()));
-			break;
-		}
-		if (recover_remaining_wals(relay->r, &relay->stream,
-					   NULL, true) != 0) {
-			relay_set_error(relay, diag_last_error(diag_get()));
-			recovery_delete(relay->r);
-			relay->r = NULL;
-			break;
-		}
-		recovery_delete(relay->r);
-		relay->r = NULL;
 	}
 
 	/*

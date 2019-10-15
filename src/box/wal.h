@@ -36,6 +36,7 @@
 #include "cbus.h"
 #include "journal.h"
 #include "vclock.h"
+#include "xstream.h"
 
 struct fiber;
 struct wal_writer;
@@ -241,8 +242,6 @@ wal_write_vy_log(struct journal_entry *req);
 void
 wal_rotate_vy_log();
 
-typedef int (*wal_relay_cb)(struct xrow_header *header, void *data);
-
 /**
  * Wal relay maintains wal memory tracking and allows
  * to retrieve logged xrows direct from the wal memory.
@@ -256,10 +255,8 @@ struct wal_relay {
 
 	/** Vclock to start relaying. */
 	struct vclock *vclock;
-	/** Callback to call for each row. */
-	wal_relay_cb on_wal_relay;
-	/** Pointer param to use with the callback. */
-	void *cb_data;
+	/** Stream to write rows. */
+	struct xstream *stream;
 	/**
 	 * A fiber created in a wal tread. This fiber fetches
 	 * rows one by one from the wal memory and/or watches
@@ -299,7 +296,7 @@ struct wal_relay {
  */
 int
 wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
-	  wal_relay_cb on_wal_relay, void *cb_data, const char *endpoint_name);
+	  struct xstream *stream, const char *endpoint_name);
 
 #if defined(__cplusplus)
 } /* extern "C" */

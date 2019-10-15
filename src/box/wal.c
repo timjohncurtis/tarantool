@@ -44,6 +44,7 @@
 #include "coio_task.h"
 #include "replication.h"
 #include "xrow_buf.h"
+#include "recovery.h"
 
 enum {
 	/**
@@ -1475,22 +1476,32 @@ wal_relay_done(struct cmsg *base)
 	fiber_cond_signal(&msg->done_cond);
 }
 
+static int
+wal_relay_from_file(struct wal_writer *writer, struct vclock *vclock,
+		    struct xstream *stream)
+{
+	/* Recover xlogs from files. */
+	struct recovery *recovery = recovery_new(writer->wal_dir.dirname, false,
+						 vclock);
+	if (recovery == NULL)
+		return -1;
+	if (recover_remaining_wals(recovery, stream, NULL, true) != 0) {
+		recovery_delete(recovery);
+		return -1;
+	}
+	recovery_delete(recovery);
+	return 0;
+}
+
 /* Wal relay fiber function. */
 static int
-wal_relay_f(va_list ap)
+wal_relay_from_memory(struct wal_writer *writer, struct vclock *vclock,
+		      struct xstream *stream)
 {
-	struct wal_writer *writer = &wal_writer_singleton;
-	struct wal_relay *msg = va_arg(ap, struct wal_relay *);
-	struct vclock *vclock = msg->vclock;
-	wal_relay_cb on_wal_relay = msg->on_wal_relay;
-	void *cb_data = msg->cb_data;
-
-	double last_row_time = ev_monotonic_now(loop());
-
-
+	double last_row_time = 0;
 	struct xrow_buf_cursor cursor;
 	if (xrow_buf_cursor_create(&writer->xrow_buf, &cursor, vclock) != 0)
-		goto done;
+		return 0;
 	/* Cursor was created and then we can process rows one by one. */
 	while (!fiber_is_cancelled()) {
 		struct xrow_header *row;
@@ -1503,7 +1514,7 @@ wal_relay_f(va_list ap)
 			 * Wal memory buffer was rotated and we are not in
 			 * memory.
 			 */
-			goto done;
+			return 0;
 		}
 		if (rc > 0) {
 			/*
@@ -1526,24 +1537,31 @@ wal_relay_f(va_list ap)
 				xrow_encode_timestamp(&hearth_beat, instance_id,
 						      ev_now(loop()));
 				last_row_time = ev_monotonic_now(loop());
-				if (on_wal_relay(&hearth_beat, cb_data) != 0) {
-					diag_move(&fiber()->diag, &msg->diag);
-					goto done;
-				}
+				if (xstream_write(stream, &hearth_beat) != 0)
+					return -1;
 			}
 			continue;
 		}
-		ERROR_INJECT(ERRINJ_WAL_MEM_IGNORE, goto done; );
+		ERROR_INJECT(ERRINJ_WAL_MEM_IGNORE, return 0);
 		last_row_time = ev_monotonic_now(loop());
-		if (on_wal_relay(row, cb_data) != 0) {
-			diag_move(&fiber()->diag, &msg->diag);
-			goto done;
-		}
+		if (xstream_write(stream, row) != 0)
+			return -1;
 	}
+	return -1;
+}
+
+static int
+wal_relay_f(va_list ap)
+{
+	struct wal_writer *writer = &wal_writer_singleton;
+	struct wal_relay *msg = va_arg(ap, struct wal_relay *);
+
+	while (wal_relay_from_memory(writer, msg->vclock, msg->stream) == 0 &&
+	       wal_relay_from_file(writer, msg->vclock, msg->stream) == 0);
+	diag_move(&fiber()->diag, &msg->diag);
 	static struct cmsg_hop done_route[] = {
 		{wal_relay_done, NULL}
 	};
-done:
 	cmsg_init(&msg->base, done_route);
 	cpipe_push(&msg->relay_pipe, &msg->base);
 	msg->fiber = NULL;
@@ -1573,11 +1591,10 @@ wal_relay_cancel(struct cmsg *base)
 
 int
 wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
-	  wal_relay_cb on_wal_relay, void *cb_data, const char *endpoint_name)
+	  struct xstream *stream, const char *endpoint_name)
 {
 	wal_relay->vclock = vclock;
-	wal_relay->on_wal_relay = on_wal_relay;
-	wal_relay->cb_data = cb_data;
+	wal_relay->stream = stream;
 	diag_create(&wal_relay->diag);
 	wal_relay->cancel_msg.route = NULL;
 
