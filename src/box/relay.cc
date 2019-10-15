@@ -76,8 +76,6 @@ struct relay {
 	uint64_t sync;
 	/** Recovery instance to read xlog from the disk */
 	struct recovery *r;
-	/** Wal directory. */
-	char *wal_dir;
 	/** Xstream argument to recovery */
 	struct xstream stream;
 	/** Vclock to stop playing xlogs */
@@ -239,7 +237,6 @@ relay_delete(struct relay *relay)
 	if (relay->state == RELAY_FOLLOW)
 		relay_stop(relay);
 	diag_destroy(&relay->diag);
-	free(relay->wal_dir);
 	TRASH(relay);
 	free(relay);
 }
@@ -523,12 +520,6 @@ relay_subscribe(struct replica *replica, int fd, uint64_t sync,
 
 	vclock_copy(&relay->local_vclock_at_subscribe, &replicaset.vclock);
 	relay->r = NULL;
-	relay->wal_dir = strdup(cfg_gets("wal_dir"));
-	if (relay->wal_dir == NULL) {
-		diag_set(OutOfMemory, strlen(cfg_gets("wal_dir")),
-			 "runtime", "wal_dir");
-		diag_raise();
-	}
 	vclock_copy(&relay->tx.vclock, replica_clock);
 	relay->version_id = replica_version_id;
 
