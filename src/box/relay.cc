@@ -384,20 +384,15 @@ relay_reader_f(va_list ap)
 			xrow_decode_vclock_xc(&xrow, &relay->recv_vclock);
 			if (relay->status_msg.msg.route != NULL)
 				continue;
-			struct vclock *send_vclock;
-			if (relay->version_id < version_id(1, 7, 4))
-				send_vclock = &relay->r->vclock;
-			else
-				send_vclock = &relay->recv_vclock;
 			if (vclock_sum(&relay->status_msg.vclock) ==
-			    vclock_sum(send_vclock))
+			    vclock_sum(&relay->recv_vclock))
 				continue;
 			static const struct cmsg_hop route[] = {
 				{tx_status_update, NULL}
 			};
 			cmsg_init(&relay->status_msg.msg, route);
 			vclock_copy(&relay->status_msg.vclock,
-				    send_vclock);
+				    &relay->recv_vclock);
 			relay->status_msg.relay = relay;
 			cpipe_push(&relay->tx_pipe, &relay->status_msg.msg);
 		}
