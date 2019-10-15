@@ -284,9 +284,6 @@ cpipe_flush_cb(ev_loop *loop, struct ev_async *watcher, int events)
 	/* Trigger task processing when the queue becomes non-empty. */
 	bool output_was_empty;
 
-	int old_cancel_state;
-	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &old_cancel_state);
-
 	tt_pthread_mutex_lock(&endpoint->mutex);
 	output_was_empty = stailq_empty(&endpoint->output);
 	/** Flush input */
@@ -300,7 +297,6 @@ cpipe_flush_cb(ev_loop *loop, struct ev_async *watcher, int events)
 
 		ev_async_send(endpoint->consumer, &endpoint->async);
 	}
-	pthread_setcancelstate(old_cancel_state, NULL);
 }
 
 void
