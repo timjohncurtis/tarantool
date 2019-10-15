@@ -489,19 +489,21 @@ relay_subscribe_f(va_list ap)
 			break;
 		};
 		/* Recover xlogs from files. */
-		try {
-			relay->r = recovery_new(relay->wal_dir, false,
-					        &relay->relay_vclock);
-			auto relay_guard = make_scoped_guard([&] {
-				recovery_delete(relay->r);
-				relay->r = NULL;
-			});
-			recover_remaining_wals(relay->r, &relay->stream,
-					       NULL, true);
-		} catch (Exception *e) {
-			relay_set_error(relay, e);
+		relay->r = recovery_new(relay->wal_dir, false,
+				        &relay->relay_vclock);
+		if (relay->r == NULL) {
+			relay_set_error(relay, diag_last_error(diag_get()));
 			break;
 		}
+		if (recover_remaining_wals(relay->r, &relay->stream,
+					   NULL, true) != 0) {
+			relay_set_error(relay, diag_last_error(diag_get()));
+			recovery_delete(relay->r);
+			relay->r = NULL;
+			break;
+		}
+		recovery_delete(relay->r);
+		relay->r = NULL;
 	}
 
 	/*
