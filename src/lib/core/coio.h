@@ -33,6 +33,9 @@
 #include "fiber.h"
 #include "trivia/util.h"
 #if defined(__cplusplus)
+extern "C" {
+#endif /* defined(__cplusplus) */
+
 #include "evio.h"
 
 /**
@@ -67,7 +70,7 @@ void
 coio_create(struct ev_io *coio, int fd);
 
 static inline void
-coio_close(ev_loop *loop, struct ev_io *coio)
+coio_destroy(ev_loop *loop, struct ev_io *coio)
 {
 	return evio_close(loop, coio);
 }
@@ -181,8 +184,6 @@ coio_stat_stat_timeout(ev_stat *stat, ev_tstamp delay);
 int
 coio_waitpid(pid_t pid);
 
-extern "C" {
-#endif /* defined(__cplusplus) */
 
 /** \cond public */
 

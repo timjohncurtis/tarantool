@@ -449,9 +449,11 @@ coio_flush(int fd, struct iovec *iov, ssize_t offset, int iovcnt)
 {
 	sio_add_to_iov(iov, -offset);
 	ssize_t nwr = sio_writev(fd, iov, iovcnt);
-	sio_add_to_iov(iov, offset);
-	if (nwr < 0 && ! sio_wouldblock(errno))
+	if (nwr < 0 && !sio_wouldblock(errno))
 		return -1;
+	sio_add_to_iov(iov, offset);
+	if (nwr < 0)
+		return 0;
 	return nwr;
 }
 
@@ -470,7 +472,9 @@ coio_writev_timeout(struct ev_io *coio, struct iovec *iov, int iovcnt,
 		/* Write as much data as possible. */
 		ssize_t nwr = coio_flush(coio->fd, iov, iov_len,
 					 end - iov);
-		if (nwr >= 0) {
+		if (nwr < 0)
+			return -1;
+		if (nwr > 0) {
 			total += nwr;
 			/*
 			 * If there was a hint for the total size

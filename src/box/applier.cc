@@ -939,7 +939,7 @@ applier_disconnect(struct applier *applier, enum applier_state state)
 		applier->writer = NULL;
 	}
 
-	coio_close(loop(), &applier->io);
+	coio_destroy(loop(), &applier->io);
 	/* Clear all unparsed input. */
 	ibuf_reinit(&applier->ibuf);
 	fiber_gc();
