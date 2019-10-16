@@ -323,83 +323,12 @@ relay_final_join(int fd, uint64_t sync, struct vclock *start_vclock,
 	});
 }
 
-/**
- * The message which updated tx thread with a new vclock has returned back
- * to the relay.
- */
-static void
-relay_status_update(struct cmsg *msg)
-{
-	msg->route = NULL;
-}
-
-/**
- * Deliver a fresh relay vclock to tx thread.
- */
-static void
-tx_status_update(struct cmsg *msg)
-{
-	struct relay_status_msg *status = (struct relay_status_msg *)msg;
-	vclock_copy(&status->relay->tx.vclock, &status->vclock);
-	gc_consumer_advance(status->relay->replica->gc, &status->vclock);
-	static const struct cmsg_hop route[] = {
-		{relay_status_update, NULL}
-	};
-	cmsg_init(msg, route);
-	cpipe_push(&status->relay->relay_pipe, msg);
-}
-
 static void
 relay_set_error(struct relay *relay, struct error *e)
 {
 	/* Don't override existing error. */
 	if (diag_is_empty(&relay->diag))
 		diag_add_error(&relay->diag, e);
-}
-
-/*
- * Relay reader fiber function.
- * Read xrow encoded vclocks sent by the replica.
- */
-int
-relay_reader_f(va_list ap)
-{
-	struct relay *relay = va_arg(ap, struct relay *);
-	struct fiber *relay_f = va_arg(ap, struct fiber *);
-
-	struct ibuf ibuf;
-	struct ev_io io;
-	coio_create(&io, relay->io.fd);
-	ibuf_create(&ibuf, &cord()->slabc, 1024);
-	try {
-		while (!fiber_is_cancelled()) {
-			struct xrow_header xrow;
-			if (coio_read_xrow_timeout(&io, &ibuf, &xrow,
-					replication_disconnect_timeout()) < 0)
-				diag_raise();
-			/* vclock is followed while decoding, zeroing it. */
-			vclock_create(&relay->recv_vclock);
-			xrow_decode_vclock_xc(&xrow, &relay->recv_vclock);
-			if (relay->status_msg.msg.route != NULL)
-				continue;
-			if (vclock_sum(&relay->status_msg.vclock) ==
-			    vclock_sum(&relay->recv_vclock))
-				continue;
-			static const struct cmsg_hop route[] = {
-				{tx_status_update, NULL}
-			};
-			cmsg_init(&relay->status_msg.msg, route);
-			vclock_copy(&relay->status_msg.vclock,
-				    &relay->recv_vclock);
-			relay->status_msg.relay = relay;
-			cpipe_push(&relay->tx_pipe, &relay->status_msg.msg);
-		}
-	} catch (Exception *e) {
-		relay_set_error(relay, e);
-		fiber_cancel(relay_f);
-	}
-	ibuf_destroy(&ibuf);
-	return 0;
 }
 
 /**
@@ -446,13 +375,6 @@ relay_subscribe_f(va_list ap)
 	cbus_pair("tx", relay->endpoint.name, &relay->tx_pipe,
 		  &relay->relay_pipe, NULL, NULL, cbus_process);
 
-	/* Start fiber for receiving replica acks. */
-	char name[FIBER_NAME_MAX];
-	snprintf(name, sizeof(name), "%s:%s", fiber()->name, "reader");
-	struct fiber *reader = fiber_new_xc(name, relay_reader_f);
-	fiber_set_joinable(reader, true);
-	fiber_start(reader, relay, fiber());
-
 	/*
 	 * If the replica happens to be up to date on subscribe,
 	 * don't wait for timeout to happen - send a heartbeat
@@ -464,7 +386,8 @@ relay_subscribe_f(va_list ap)
 	while (!fiber_is_cancelled()) {
 		/* Try to relay direct from wal memory buffer. */
 		if (wal_relay(&relay->wal_relay, &relay->relay_vclock,
-			      &relay->stream, tt_sprintf("relay_%p", relay)) != 0) {
+			      &relay->tx.vclock, relay->io.fd, &relay->stream,
+			      relay->replica, tt_sprintf("relay_%p", relay)) != 0) {
 			relay_set_error(relay, diag_last_error(&fiber()->diag));
 			break;
 		};
@@ -478,10 +401,6 @@ relay_subscribe_f(va_list ap)
 	diag_add_error(diag_get(), diag_last_error(&relay->diag));
 	diag_log();
 	say_crit("exiting the relay loop");
-
-	/* Join ack reader fiber. */
-	fiber_cancel(reader);
-	fiber_join(reader);
 
 	/* Destroy cpipe to tx. */
 	cbus_unpair(&relay->tx_pipe, &relay->relay_pipe,

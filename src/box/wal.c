@@ -45,6 +45,9 @@
 #include "replication.h"
 #include "xrow_buf.h"
 #include "recovery.h"
+#include "coio.h"
+#include "xrow_io.h"
+#include "gc.h"
 
 enum {
 	/**
@@ -1476,6 +1479,103 @@ wal_relay_done(struct cmsg *base)
 	fiber_cond_signal(&msg->done_cond);
 }
 
+struct wal_relay_status_msg {
+	struct cmsg base;
+	struct vclock src_vclock;
+	struct vclock *dst_vclock;
+	struct wal_writer *writer;
+	struct replica *replica;
+	struct fiber_cond cond;
+};
+
+/**
+ * The message which updated tx thread with a new vclock has returned back
+ * to the relay.
+ */
+static void
+wal_relay_status_update(struct cmsg *base)
+{
+	struct wal_relay_status_msg *status = container_of(base, struct wal_relay_status_msg, base);
+	base->route = NULL;
+	fiber_cond_signal(&status->cond);
+}
+
+/**
+ * Deliver a fresh relay vclock to tx thread.
+ */
+static void
+tx_status_update(struct cmsg *base)
+{
+	struct wal_relay_status_msg *status = container_of(base, struct wal_relay_status_msg, base);
+	vclock_copy(status->dst_vclock, &status->src_vclock);
+	gc_consumer_advance(status->replica->gc, &status->src_vclock);
+	static const struct cmsg_hop route[] = {
+		{wal_relay_status_update, NULL}
+	};
+	cmsg_init(base, route);
+	cpipe_push(&status->writer->wal_pipe, base);
+}
+
+
+/*
+ * Relay reader fiber function.
+ * Read xrow encoded vclocks sent by the replica.
+ */
+static int
+wal_relay_reader_f(va_list ap)
+{
+	struct wal_writer *writer = va_arg(ap, struct wal_writer *);
+	struct fiber *relay_f = va_arg(ap, struct fiber *);
+
+	struct wal_relay_status_msg status_msg;
+	cmsg_init(&status_msg.base, NULL);
+	vclock_create(&status_msg.src_vclock);
+	status_msg.dst_vclock = va_arg(ap, struct vclock *);
+	status_msg.writer = writer;
+	status_msg.replica = va_arg(ap, struct replica *);
+	int fd = va_arg(ap, int);
+	struct diag *diag = va_arg(ap, struct diag *);
+	fiber_cond_create(&status_msg.cond);
+
+	struct vclock cur_vclock;
+
+	struct ibuf ibuf;
+	struct ev_io io;
+	coio_create(&io, fd);
+	ibuf_create(&ibuf, &cord()->slabc, 1024);
+	while (!fiber_is_cancelled()) {
+		struct xrow_header xrow;
+		if (coio_read_xrow_timeout(&io, &ibuf, &xrow,
+					   replication_disconnect_timeout()) < 0) {
+			if (diag_is_empty(diag))
+				diag_move(&fiber()->diag, diag);
+			break;
+		}
+		/* vclock is followed while decoding, zeroing it. */
+		vclock_create(&cur_vclock);
+		if (xrow_decode_vclock(&xrow, &cur_vclock) < 0)
+			break;
+
+		if (status_msg.base.route != NULL)
+			continue;
+		if (vclock_sum(&status_msg.src_vclock) ==
+		    vclock_sum(&cur_vclock))
+			continue;
+		static const struct cmsg_hop route[] = {
+			{tx_status_update, NULL}
+		};
+		cmsg_init(&status_msg.base, route);
+		vclock_copy(&status_msg.src_vclock, &cur_vclock);
+		cpipe_push(&writer->tx_prio_pipe, &status_msg.base);
+	}
+	ibuf_destroy(&ibuf);
+	fiber_cancel(relay_f);
+	while (status_msg.base.route != NULL)
+		fiber_cond_wait(&status_msg.cond);
+	return 0;
+}
+
+
 static int
 wal_relay_from_file(struct wal_writer *writer, struct vclock *vclock,
 		    struct xstream *stream)
@@ -1556,9 +1656,27 @@ wal_relay_f(va_list ap)
 	struct wal_writer *writer = &wal_writer_singleton;
 	struct wal_relay *msg = va_arg(ap, struct wal_relay *);
 
+	/* Start fiber for receiving replica acks. */
+	char name[FIBER_NAME_MAX];
+	snprintf(name, sizeof(name), "%s:%s", fiber()->name, "reader");
+	struct fiber *reader = fiber_new(name, wal_relay_reader_f);
+	if (reader == NULL) {
+		diag_move(&fiber()->diag, &msg->diag);
+		return 0;
+	}
+	fiber_set_joinable(reader, true);
+	fiber_start(reader, writer, fiber(), msg->dst_vclock, msg->replica,
+		    msg->fd, &msg->diag);
+
 	while (wal_relay_from_memory(writer, msg->vclock, msg->stream) == 0 &&
 	       wal_relay_from_file(writer, msg->vclock, msg->stream) == 0);
-	diag_move(&fiber()->diag, &msg->diag);
+	if (diag_is_empty(&msg->diag))
+		diag_move(&fiber()->diag, &msg->diag);
+
+	/* Join ack reader fiber. */
+	fiber_cancel(reader);
+	fiber_join(reader);
+
 	static struct cmsg_hop done_route[] = {
 		{wal_relay_done, NULL}
 	};
@@ -1591,10 +1709,14 @@ wal_relay_cancel(struct cmsg *base)
 
 int
 wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
-	  struct xstream *stream, const char *endpoint_name)
+	  struct vclock *dst_vclock, int fd, struct xstream *stream,
+	  struct replica *replica, const char *endpoint_name)
 {
 	wal_relay->vclock = vclock;
 	wal_relay->stream = stream;
+	wal_relay->dst_vclock = dst_vclock;
+	wal_relay->fd = fd;
+	wal_relay->replica = replica;
 	diag_create(&wal_relay->diag);
 	wal_relay->cancel_msg.route = NULL;
 

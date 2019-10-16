@@ -255,6 +255,8 @@ struct wal_relay {
 
 	/** Vclock to start relaying. */
 	struct vclock *vclock;
+	struct vclock *dst_vclock;
+	int fd;
 	/** Stream to write rows. */
 	struct xstream *stream;
 	/**
@@ -273,6 +275,7 @@ struct wal_relay {
 	int rc;
 	/* Diagnostic area. */
 	struct diag diag;
+	struct replica *replica;
 };
 
 /**
@@ -295,8 +298,9 @@ struct wal_relay {
  * @retval -1 relaying was finished because of an error.
  */
 int
-wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
-	  struct xstream *stream, const char *endpoint_name);
+wal_relay(struct wal_relay *wal_relay, struct vclock *src_vclock,
+	  struct vclock *dst_vclock, int fd, struct xstream *stream,
+	  struct replica *replica, const char *endpoint_name);
 
 #if defined(__cplusplus)
 } /* extern "C" */
