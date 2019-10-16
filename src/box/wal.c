@@ -1681,15 +1681,15 @@ wal_relay_f(va_list ap)
 		{wal_relay_done, NULL}
 	};
 	cmsg_init(&msg->base, done_route);
-	cpipe_push(&msg->relay_pipe, &msg->base);
+	cpipe_push(&writer->tx_prio_pipe, &msg->base);
 	msg->fiber = NULL;
 	return 0;
 }
 
 static void
-wal_relay_attach(void *data)
+wal_relay_attach(struct cmsg *base)
 {
-	struct wal_relay *msg = (struct wal_relay *)data;
+	struct wal_relay *msg = container_of(base, struct wal_relay, base);
 	msg->fiber = fiber_new("wal relay fiber", wal_relay_f);
 	fiber_start(msg->fiber, msg);
 }
@@ -1710,8 +1710,9 @@ wal_relay_cancel(struct cmsg *base)
 int
 wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
 	  struct vclock *dst_vclock, int fd, struct xstream *stream,
-	  struct replica *replica, const char *endpoint_name)
+	  struct replica *replica)
 {
+	struct wal_writer *writer = &wal_writer_singleton;
 	wal_relay->vclock = vclock;
 	wal_relay->stream = stream;
 	wal_relay->dst_vclock = dst_vclock;
@@ -1723,9 +1724,10 @@ wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
 	fiber_cond_create(&wal_relay->done_cond);
 	wal_relay->done = false;
 
-	cbus_pair("wal", endpoint_name, &wal_relay->wal_pipe,
-		  &wal_relay->relay_pipe,
-		  wal_relay_attach, wal_relay, cbus_process);
+	static struct cmsg_hop route[] = {{wal_relay_attach, NULL}};
+	cmsg_init(&wal_relay->base, route);
+	cpipe_push(&writer->wal_pipe, &wal_relay->base);
+
 
 	/*
 	 * We do not use cbus_call because we should be able to
@@ -1739,13 +1741,10 @@ wal_relay(struct wal_relay *wal_relay, struct vclock *vclock,
 			static struct cmsg_hop cancel_route[]= {
 				{wal_relay_cancel, NULL}};
 			cmsg_init(&wal_relay->cancel_msg, cancel_route);
-			cpipe_push(&wal_relay->wal_pipe, &wal_relay->cancel_msg);
+			cpipe_push(&writer->wal_pipe, &wal_relay->cancel_msg);
 		}
 		fiber_cond_wait(&wal_relay->done_cond);
 	}
-
-	cbus_unpair(&wal_relay->wal_pipe, &wal_relay->relay_pipe,
-		    NULL, NULL, cbus_process);
 
 	if (!diag_is_empty(&wal_relay->diag)) {
 		diag_move(&wal_relay->diag, &fiber()->diag);

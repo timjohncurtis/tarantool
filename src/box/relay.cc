@@ -347,70 +347,6 @@ relay_send_heartbeat(struct relay *relay)
 	}
 }
 
-static void
-relay_endpoint_cb(struct ev_loop *loop, ev_watcher *watcher, int events)
-{
-	(void) loop;
-	(void) events;
-	struct cbus_endpoint *endpoint = (struct cbus_endpoint *)watcher->data;
-	cbus_process(endpoint);
-}
-
-/**
- * A libev callback invoked when a relay client socket is ready
- * for read. This currently only happens when the client closes
- * its socket, and we get an EOF.
- */
-static int
-relay_subscribe_f(va_list ap)
-{
-	struct relay *relay = va_arg(ap, struct relay *);
-
-	coio_enable();
-	relay_set_cord_name(relay->io.fd);
-
-	/* Create cpipe to tx for propagating vclock. */
-	cbus_endpoint_create(&relay->endpoint, tt_sprintf("relay_%p", relay),
-			     relay_endpoint_cb, &relay->endpoint);
-	cbus_pair("tx", relay->endpoint.name, &relay->tx_pipe,
-		  &relay->relay_pipe, NULL, NULL, cbus_process);
-
-	/*
-	 * If the replica happens to be up to date on subscribe,
-	 * don't wait for timeout to happen - send a heartbeat
-	 * message right away to update the replication lag as
-	 * soon as possible.
-	 */
-	relay_send_heartbeat(relay);
-
-	while (!fiber_is_cancelled()) {
-		/* Try to relay direct from wal memory buffer. */
-		if (wal_relay(&relay->wal_relay, &relay->relay_vclock,
-			      &relay->tx.vclock, relay->io.fd, &relay->stream,
-			      relay->replica, tt_sprintf("relay_%p", relay)) != 0) {
-			relay_set_error(relay, diag_last_error(&fiber()->diag));
-			break;
-		};
-	}
-
-	/*
-	 * Log the error that caused the relay to break the loop.
-	 * Don't clear the error for status reporting.
-	 */
-	assert(!diag_is_empty(&relay->diag));
-	diag_add_error(diag_get(), diag_last_error(&relay->diag));
-	diag_log();
-	say_crit("exiting the relay loop");
-
-	/* Destroy cpipe to tx. */
-	cbus_unpair(&relay->tx_pipe, &relay->relay_pipe,
-		    NULL, NULL, cbus_process);
-	cbus_endpoint_destroy(&relay->endpoint, cbus_process);
-
-	relay_exit(relay);
-	return -1;
-}
-
 /** Replication acceptor fiber handler. */
 void
 relay_subscribe(struct replica *replica, int fd, uint64_t sync,
@@ -443,12 +379,20 @@ relay_subscribe(struct replica *replica, int fd, uint64_t sync,
 	vclock_copy(&relay->tx.vclock, replica_clock);
 	relay->version_id = replica_version_id;
 
-	int rc = cord_costart(&relay->cord, "subscribe",
-			      relay_subscribe_f, relay);
-	if (rc == 0)
-		rc = cord_cojoin(&relay->cord);
-	if (rc != 0)
-		diag_raise();
+	/*
+	 * If the replica happens to be up to date on subscribe,
+	 * don't wait for timeout to happen - send a heartbeat
+	 * message right away to update the replication lag as
+	 * soon as possible.
+	 */
+	relay_send_heartbeat(relay);
+	if (wal_relay(&relay->wal_relay, &relay->relay_vclock,
+		      &relay->tx.vclock, relay->io.fd, &relay->stream,
+		      relay->replica) != 0) {
+		relay_set_error(relay, diag_last_error(&fiber()->diag));
+	};
+	relay_exit(relay);
+	diag_raise();
 }
 
 static void

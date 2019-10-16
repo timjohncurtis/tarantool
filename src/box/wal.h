@@ -248,10 +248,6 @@ wal_rotate_vy_log();
  */
 struct wal_relay {
 	struct cmsg base;
-	/** Cbus pipe to wal cord. */
-	struct cpipe wal_pipe;
-	/** Cbus pipe from wal cord. */
-	struct cpipe relay_pipe;
 
 	/** Vclock to start relaying. */
 	struct vclock *vclock;
@@ -300,7 +296,7 @@ struct wal_relay {
 int
 wal_relay(struct wal_relay *wal_relay, struct vclock *src_vclock,
 	  struct vclock *dst_vclock, int fd, struct xstream *stream,
-	  struct replica *replica, const char *endpoint_name);
+	  struct replica *replica);
 
 #if defined(__cplusplus)
 } /* extern "C" */
