@@ -37,6 +37,7 @@
 #include "sqlInt.h"
 #include "box/fk_constraint.h"
 #include "box/schema.h"
+#include "box/sequence.h"
 
 /*
  * Deferred and Immediate FKs
@@ -199,6 +200,8 @@ fk_constraint_lookup_parent(struct Parse *parse_context, struct space *parent,
 	struct Vdbe *v = sqlGetVdbe(parse_context);
 	int cursor = parse_context->nTab - 1;
 	int ok_label = sqlVdbeMakeLabel(v);
+	struct space *child = space_by_id(fk_def->child_id);
+	assert(child != NULL);
 	/*
 	 * If incr_count is less than zero, then check at runtime
 	 * if there are any outstanding constraints to resolve.
@@ -216,6 +219,15 @@ fk_constraint_lookup_parent(struct Parse *parse_context, struct space *parent,
 	}
 	struct field_link *link = fk_def->links;
 	for (uint32_t i = 0; i < fk_def->field_count; ++i, ++link) {
+		if (child->sequence != NULL &&
+		    child->sequence_fieldno == link->child_field) {
+			/*
+			 * In case of auto incremented field
+			 * this heuristics is not applicable and
+			 * fk constraint should be evaluated.
+			 */
+			continue;
+		}
 		int reg = link->child_field + reg_data + 1;
 		sqlVdbeAddOp2(v, OP_IsNull, reg, ok_label);
 	}
@@ -258,9 +270,21 @@ fk_constraint_lookup_parent(struct Parse *parse_context, struct space *parent,
 				      parent);
 		link = fk_def->links;
 		for (uint32_t i = 0; i < field_count; ++i, ++link) {
-			sqlVdbeAddOp2(v, OP_Copy,
-					  link->child_field + 1 + reg_data,
-					  temp_regs + i);
+			if (child->sequence != NULL &&
+			    child->sequence_fieldno == link->child_field) {
+				/*
+				 * Retrieve a next sequence value
+				 * for an autoincremented field
+				 * and validate it instead of
+				 * NULL placeholder.
+				 */
+				sqlVdbeAddOp2(v, OP_NextSequenceValue,
+					      fk_def->child_id, temp_regs + i);
+			} else {
+				sqlVdbeAddOp2(v, OP_Copy,
+					      link->child_field + 1 + reg_data,
+					      temp_regs + i);
+			}
 		}
 		struct index *idx = space_index(parent, referenced_idx);
 		assert(idx != NULL);

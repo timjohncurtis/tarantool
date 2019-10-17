@@ -1,0 +1,90 @@
+-- test-run result file version 2
+env = require('test_run')
+ | ---
+ | ...
+test_run = env.new()
+ | ---
+ | ...
+engine = test_run:get_cfg('engine')
+ | ---
+ | ...
+box.execute('pragma sql_default_engine=\''..engine..'\'')
+ | ---
+ | - row_count: 0
+ | ...
+
+--
+-- gh-4565: Missing foreign key check in case of
+--          autoincremented field
+--
+box.execute("CREATE TABLE t1 (s1 INTEGER PRIMARY KEY);")
+ | ---
+ | - row_count: 1
+ | ...
+box.execute("CREATE TABLE t2 (s1 INTEGER PRIMARY KEY AUTOINCREMENT, FOREIGN KEY (s1) REFERENCES t1);")
+ | ---
+ | - row_count: 1
+ | ...
+box.execute("INSERT INTO t2 VALUES (NULL);")
+ | ---
+ | - null
+ | - 'Failed to execute SQL statement: FOREIGN KEY constraint failed'
+ | ...
+box.space.T1:count() == 0
+ | ---
+ | - true
+ | ...
+box.space.T2:count() == 0
+ | ---
+ | - true
+ | ...
+box.execute("INSERT INTO t1 VALUES (1);")
+ | ---
+ | - row_count: 1
+ | ...
+box.execute("INSERT INTO t2 VALUES (NULL);")
+ | ---
+ | - autoincrement_ids:
+ |   - 1
+ |   row_count: 1
+ | ...
+box.space.T1:count() == 1
+ | ---
+ | - true
+ | ...
+box.space.T2:count() == 1
+ | ---
+ | - true
+ | ...
+box.execute("INSERT INTO t2 VALUES (NULL);")
+ | ---
+ | - null
+ | - 'Failed to execute SQL statement: FOREIGN KEY constraint failed'
+ | ...
+box.space.T1:count() == 1
+ | ---
+ | - true
+ | ...
+box.space.T2:count() == 1
+ | ---
+ | - true
+ | ...
+box.sequence.T2:set(box.sequence.T2.max)
+ | ---
+ | ...
+box.sequence.T2:next()
+ | ---
+ | - error: Sequence 'T2' has overflowed
+ | ...
+box.execute("INSERT INTO t2 VALUES (NULL);")
+ | ---
+ | - null
+ | - Sequence 'T2' has overflowed
+ | ...
+box.space.T1:drop()
+ | ---
+ | - error: 'Can''t modify space ''T1'': can not drop a referenced index'
+ | ...
+box.space.T2:drop()
+ | ---
+ | ...

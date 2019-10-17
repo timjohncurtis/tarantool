@@ -137,6 +137,17 @@ sequence_set(struct sequence *seq, int64_t value);
 int
 sequence_update(struct sequence *seq, int64_t value);
 
+
+/**
+ * Return the next sequence value.
+ * In case of overflow, the diag error message is set.
+ *
+ * @result, otherwise return -1 and set diag.
+ */
+int
+sequence_next_value(struct sequence *seq, int64_t *result, uint32_t *key_hash,
+		    bool *is_start);
+
 /**
  * Advance a sequence.
  *

@@ -3731,6 +3731,27 @@ case OP_NextSequenceId: {
 	break;
 }
 
+/* Opcode: NextSequenceValue P1 P2 * * *
+ * Synopsis: r[P2]=sequence_get_value(space_by_id(p1))
+ *
+ * Get a next value of the sequence registered for a space
+ * with given id. Store result in P2 memory register.
+ */
+case OP_NextSequenceValue: {
+	struct space *space = space_by_id(pOp->p1);
+	assert(space != NULL);
+	assert(space->sequence != NULL);
+	bool is_start;
+	uint32_t dummy;
+	int64_t seq_val;
+	if (sequence_next_value(space->sequence, &seq_val, &dummy,
+				&is_start) != 0)
+		goto abort_due_to_error;
+	pOut = vdbe_prepare_null_out(p, pOp->p2);
+	mem_set_i64(pOut, seq_val);
+	break;
+}
+
 /* Opcode: NextIdEphemeral P1 P2 * * *
  * Synopsis: r[P2]=get_next_rowid(space[P1])
  *

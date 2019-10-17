@@ -201,25 +201,23 @@ sequence_update(struct sequence *seq, int64_t value)
 }
 
 int
-sequence_next(struct sequence *seq, int64_t *result)
+sequence_next_value(struct sequence *seq, int64_t *result, uint32_t *key_hash,
+		    bool *is_start)
 {
-	int64_t value;
 	struct sequence_def *def = seq->def;
-	struct sequence_data new_data, old_data;
-	uint32_t key = seq->def->id;
-	uint32_t hash = sequence_hash(key);
-	uint32_t pos = light_sequence_find_key(&sequence_data_index, hash, key);
+	uint32_t key = def->id;
+	*key_hash = sequence_hash(key);
+	uint32_t pos = light_sequence_find_key(&sequence_data_index,
+					       *key_hash, key);
 	if (pos == light_sequence_end) {
-		new_data.id = key;
-		new_data.value = def->start;
-		if (light_sequence_insert(&sequence_data_index, hash,
-					  new_data) == light_sequence_end)
-			return -1;
+		*is_start = true;
 		*result = def->start;
 		return 0;
 	}
-	old_data = light_sequence_get(&sequence_data_index, pos);
-	value = old_data.value;
+	*is_start = false;
+	struct sequence_data old_data =
+		light_sequence_get(&sequence_data_index, pos);
+	int64_t value = old_data.value;
 	if (def->step > 0) {
 		if (value < def->min) {
 			value = def->min;
@@ -244,11 +242,6 @@ sequence_next(struct sequence *seq, int64_t *result)
 	}
 done:
 	assert(value >= def->min && value <= def->max);
-	new_data.id = key;
-	new_data.value = value;
-	if (light_sequence_replace(&sequence_data_index, hash,
-				   new_data, &old_data) == light_sequence_end)
-		unreachable();
 	*result = value;
 	return 0;
 overflow:
@@ -258,6 +251,31 @@ overflow:
 	}
 	value = def->step > 0 ? def->min : def->max;
 	goto done;
+}
+
+int
+sequence_next(struct sequence *seq, int64_t *result)
+{
+	uint32_t key_hash;
+	bool is_start;
+	if (sequence_next_value(seq, result, &key_hash, &is_start) != 0) {
+		assert(is_start == false);
+		return -1;
+	}
+	uint32_t key = seq->def->id;
+	struct sequence_data old_data, new_data;
+	new_data.id = key;
+	new_data.value = *result;
+	if (is_start) {
+		if (light_sequence_insert(&sequence_data_index, key_hash,
+					  new_data) == light_sequence_end)
+			return -1;
+	} else {
+		if (light_sequence_replace(&sequence_data_index, key_hash,
+				   new_data, &old_data) == light_sequence_end)
+			unreachable();
+	}
+	return 0;
 }
 
 int
