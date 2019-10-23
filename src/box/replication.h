@@ -192,6 +192,10 @@ struct replicaset {
 	 * of the cluster as maintained by appliers.
 	 */
 	struct vclock vclock;
+
+	struct vclock wal_vclock;
+	struct rlist on_wal_vclock;
+
 	/**
 	 * This flag is set while the instance is bootstrapping
 	 * from a remote master.

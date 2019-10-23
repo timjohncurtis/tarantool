@@ -71,6 +71,11 @@ wal_write(struct journal *, struct journal_entry *);
 static int64_t
 wal_write_in_wal_mode_none(struct journal *, struct journal_entry *);
 
+struct update_wal_vclock_msg {
+	struct cmsg base;
+	struct vclock vclock;
+};
+
 /*
  * WAL writer - maintain a Write Ahead Log for every change
  * in the data state.
@@ -171,6 +176,9 @@ struct wal_writer
 	struct xrow_buf xrow_buf;
 	/* xrow buffer condition signaled when buffer write was done. */
 	struct fiber_cond xrow_buf_cond;
+
+	struct update_wal_vclock_msg update_wal_vclock_msg;
+
 };
 
 struct wal_msg {
@@ -966,6 +974,29 @@ wal_assign_lsn(struct vclock *vclock_diff, struct vclock *base,
 }
 
 static void
+wal_update_wal_vclock_done(struct cmsg *base)
+{
+	struct update_wal_vclock_msg *msg =
+		container_of(base, struct update_wal_vclock_msg, base);
+	struct wal_writer *writer = &wal_writer_singleton;
+	if (vclock_compare(&writer->vclock, &msg->vclock) != 0) {
+		vclock_copy(&msg->vclock, &writer->vclock);
+		cmsg_init(base, base->route);
+		cpipe_push(&writer->tx_prio_pipe, base);
+	} else
+		base->route = NULL;
+}
+
+static void
+tx_update_wal_vclock(struct cmsg *base)
+{
+	struct update_wal_vclock_msg *msg =
+		container_of(base, struct update_wal_vclock_msg, base);
+	vclock_copy(&replicaset.wal_vclock, &msg->vclock);
+	trigger_run(&replicaset.on_wal_vclock, NULL);
+}
+
+static void
 wal_write_to_disk(struct cmsg *msg)
 {
 	struct wal_writer *writer = &wal_writer_singleton;
@@ -1138,6 +1169,16 @@ done:
 	}
 	fiber_gc();
 	wal_notify_watchers(writer, WAL_EVENT_WRITE);
+	static struct cmsg_hop update_wal_vclock_route[] = {
+		{tx_update_wal_vclock, &wal_writer_singleton.wal_pipe},
+		{wal_update_wal_vclock_done, NULL}
+	};
+	if (writer->update_wal_vclock_msg.base.route == NULL) {
+		cmsg_init(&writer->update_wal_vclock_msg.base,
+			  update_wal_vclock_route);
+		cpipe_push(&writer->tx_prio_pipe,
+			   &writer->update_wal_vclock_msg.base);
+	}
 }
 
 /** WAL writer main loop.  */

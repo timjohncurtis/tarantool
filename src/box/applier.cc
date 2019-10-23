@@ -764,6 +764,17 @@ applier_on_commit(struct trigger *trigger, void *event)
 }
 
 /*
+ * A trigger to update an applier state after a wal write.
+ */
+static void
+applier_on_wal_write(struct trigger *trigger, void *event)
+{
+	(void) event;
+	struct applier *applier = (struct applier *)trigger->data;
+	fiber_cond_signal(&applier->writer_cond);
+}
+
+/*
  * A trigger to update an applier state after a replication rollback.
  */
 static void
@@ -892,9 +903,14 @@ applier_subscribe(struct applier *applier)
 	trigger_create(&on_rollback, applier_on_rollback, applier, NULL);
 	trigger_add(&replicaset.applier.on_rollback, &on_rollback);
 
+	struct trigger on_wal_write;
+	trigger_create(&on_wal_write, applier_on_wal_write, applier, NULL);
+	trigger_add(&replicaset.on_wal_vclock, &on_wal_write);
+
 	auto trigger_guard = make_scoped_guard([&] {
 		trigger_clear(&on_commit);
 		trigger_clear(&on_rollback);
+		trigger_clear(&on_wal_write);
 	});
 
 	/*
