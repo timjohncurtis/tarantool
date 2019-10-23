@@ -89,6 +89,7 @@ const unsigned char iproto_key_type[IPROTO_KEY_MAX] =
 	/* 0x29 */	MP_MAP, /* IPROTO_BALLOT */
 	/* 0x2a */	MP_MAP, /* IPROTO_TUPLE_META */
 	/* 0x2b */	MP_MAP, /* IPROTO_OPTIONS */
+	/* 0x27 */	MP_MAP, /* IPROTO_WAL_VCLOCK */
 	/* }}} */
 };
 

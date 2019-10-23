@@ -1293,6 +1293,35 @@ xrow_encode_vclock(struct xrow_header *row, const struct vclock *vclock)
 }
 
 int
+xrow_encode_applier_state(struct xrow_header *row, const struct vclock *vclock,
+			  const struct vclock *wal_vclock)
+{
+	memset(row, 0, sizeof(*row));
+
+	/* Add vclock to response body */
+	size_t size = mp_sizeof_map(2) + mp_sizeof_uint(IPROTO_VCLOCK) +
+		      mp_sizeof_uint(IPROTO_WAL_VCLOCK) +
+		      mp_sizeof_vclock(vclock) + mp_sizeof_vclock(wal_vclock);
+	char *buf = (char *) region_alloc(&fiber()->gc, size);
+	if (buf == NULL) {
+		diag_set(OutOfMemory, size, "region_alloc", "buf");
+		return -1;
+	}
+	char *data = buf;
+	data = mp_encode_map(data, 2);
+	data = mp_encode_uint(data, IPROTO_VCLOCK);
+	data = mp_encode_vclock(data, vclock);
+	data = mp_encode_uint(data, IPROTO_WAL_VCLOCK);
+	data = mp_encode_vclock(data, wal_vclock);
+	assert(data <= buf + size);
+	row->body[0].iov_base = buf;
+	row->body[0].iov_len = (data - buf);
+	row->bodycnt = 1;
+	row->type = IPROTO_OK;
+	return 0;
+}
+
+int
 xrow_encode_subscribe_response(struct xrow_header *row,
 			       const struct tt_uuid *replicaset_uuid,
 			       const struct vclock *vclock)

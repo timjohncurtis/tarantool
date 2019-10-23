@@ -364,6 +364,11 @@ xrow_decode_join(struct xrow_header *row, struct tt_uuid *instance_uuid)
 int
 xrow_encode_vclock(struct xrow_header *row, const struct vclock *vclock);
 
+int
+xrow_encode_applier_state(struct xrow_header *row,
+			  const struct vclock *commited_vclock,
+			  const struct vclock *written_vclock);
+
 /**
  * Decode end of stream command (a response to JOIN command).
  * @param row Row to decode.
