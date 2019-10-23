@@ -48,6 +48,7 @@
 #include "coio.h"
 #include "xrow_io.h"
 #include "gc.h"
+#include "mclock.h"
 
 enum {
 	/**
@@ -178,6 +179,8 @@ struct wal_writer
 	struct fiber_cond xrow_buf_cond;
 
 	struct update_wal_vclock_msg update_wal_vclock_msg;
+
+	struct mclock mclock;
 
 };
 
@@ -1179,6 +1182,7 @@ done:
 		cpipe_push(&writer->tx_prio_pipe,
 			   &writer->update_wal_vclock_msg.base);
 	}
+	mclock_attach(&writer->mclock, instance_id, &writer->vclock);
 }
 
 /** WAL writer main loop.  */
@@ -1189,6 +1193,8 @@ wal_writer_f(va_list ap)
 	struct wal_writer *writer = &wal_writer_singleton;
 	xrow_buf_create(&writer->xrow_buf);
 	fiber_cond_create(&writer->xrow_buf_cond);
+	mclock_create(&writer->mclock);
+	mclock_attach(&writer->mclock, instance_id, &writer->vclock);
 
 	/** Initialize eio in this thread */
 	coio_enable();
@@ -1229,6 +1235,7 @@ wal_writer_f(va_list ap)
 
 	cpipe_destroy(&writer->tx_prio_pipe);
 	xrow_buf_destroy(&writer->xrow_buf);
+	mclock_destroy(&writer->mclock);
 	return 0;
 }
 
@@ -1578,7 +1585,8 @@ wal_relay_reader_f(va_list ap)
 	struct diag *diag = va_arg(ap, struct diag *);
 	fiber_cond_create(&status_msg.cond);
 
-	struct vclock cur_vclock;
+	struct vclock vclock;
+	struct vclock wal_vclock;
 
 	struct ibuf ibuf;
 	struct ev_io io;
@@ -1593,20 +1601,22 @@ wal_relay_reader_f(va_list ap)
 			break;
 		}
 		/* vclock is followed while decoding, zeroing it. */
-		vclock_create(&cur_vclock);
-		if (xrow_decode_vclock(&xrow, &cur_vclock) < 0)
+		vclock_create(&vclock);
+		if (xrow_decode_applier_state(&xrow, &vclock,
+					      &wal_vclock) < 0)
 			break;
+		mclock_attach(&writer->mclock, status_msg.replica->id, &wal_vclock);
 
 		if (status_msg.base.route != NULL)
 			continue;
 		if (vclock_sum(&status_msg.src_vclock) ==
-		    vclock_sum(&cur_vclock))
+		    vclock_sum(&vclock))
 			continue;
 		static const struct cmsg_hop route[] = {
 			{tx_status_update, NULL}
 		};
 		cmsg_init(&status_msg.base, route);
-		vclock_copy(&status_msg.src_vclock, &cur_vclock);
+		vclock_copy(&status_msg.src_vclock, &vclock);
 		cpipe_push(&writer->tx_prio_pipe, &status_msg.base);
 	}
 	ibuf_destroy(&ibuf);

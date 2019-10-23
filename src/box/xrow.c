@@ -1322,6 +1322,55 @@ xrow_encode_applier_state(struct xrow_header *row, const struct vclock *vclock,
 }
 
 int
+xrow_decode_applier_state(struct xrow_header *row, struct vclock *vclock,
+			  struct vclock *wal_vclock)
+{
+	if (row->bodycnt == 0) {
+		diag_set(ClientError, ER_INVALID_MSGPACK, "request body");
+		return -1;
+	}
+	assert(row->bodycnt == 1);
+	const char * const data = (const char *) row->body[0].iov_base;
+	const char *end = data + row->body[0].iov_len;
+	const char *d = data;
+	if (mp_check(&d, end) != 0 || mp_typeof(*data) != MP_MAP) {
+		xrow_on_decode_err(data, end, ER_INVALID_MSGPACK,
+				   "request body");
+		return -1;
+	}
+
+	d = data;
+	uint32_t map_size = mp_decode_map(&d);
+	for (uint32_t i = 0; i < map_size; i++) {
+		if (mp_typeof(*d) != MP_UINT) {
+			mp_next(&d); /* key */
+			mp_next(&d); /* value */
+			continue;
+		}
+		uint8_t key = mp_decode_uint(&d);
+		switch (key) {
+		case IPROTO_VCLOCK:
+			if (mp_decode_vclock(&d, vclock) != 0) {
+				xrow_on_decode_err(data, end, ER_INVALID_MSGPACK,
+						   "invalid VCLOCK");
+				return -1;
+			}
+			break;
+		case IPROTO_WAL_VCLOCK:
+			if (mp_decode_vclock(&d, wal_vclock) != 0) {
+				xrow_on_decode_err(data, end, ER_INVALID_MSGPACK,
+						   "invalid VCLOCK");
+				return -1;
+			}
+			break;
+		default:
+			mp_next(&d); /* value */
+		}
+	}
+	return 0;
+}
+
+int
 xrow_encode_subscribe_response(struct xrow_header *row,
 			       const struct tt_uuid *replicaset_uuid,
 			       const struct vclock *vclock)
