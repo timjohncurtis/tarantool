@@ -213,6 +213,9 @@ wal_begin_checkpoint(struct wal_checkpoint *checkpoint);
 void
 wal_commit_checkpoint(struct wal_checkpoint *checkpoint);
 
+int
+wal_rotate();
+
 /**
  * Set the WAL size threshold exceeding which will trigger
  * checkpointing in TX.

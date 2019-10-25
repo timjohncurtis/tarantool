@@ -4,9 +4,8 @@ space = box.schema.space.create('test')
 index = box.space.test:create_index('primary')
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate()
 ---
-- ok
 ...
 box.space.test:insert{1, 'first tuple'}
 ---

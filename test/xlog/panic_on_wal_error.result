@@ -87,6 +87,9 @@ box.space.test:auto_increment{'after snapshot - one more row'}
 --
 -- save snapshot and remove xlogs
 -- 
+box.internal.wal_rotate()
+---
+...
 box.snapshot()
 ---
 - ok

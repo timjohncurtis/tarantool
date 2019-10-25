@@ -34,7 +34,7 @@ test_run:cleanup_cluster()
 box.schema.user.grant('guest', 'replication')
 s = box.schema.space.create('test', {engine = engine})
 _ = s:create_index('pk')
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 
 --
 -- Create a few dead replicas to pin WAL files.
@@ -45,14 +45,14 @@ test_run:cmd("stop server replica")
 test_run:cmd("cleanup server replica")
 
 s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 
 test_run:cmd("start server replica")
 test_run:cmd("stop server replica")
 test_run:cmd("cleanup server replica")
 
 s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 
 test_run:cmd("start server replica")
 test_run:cmd("stop server replica")
@@ -64,9 +64,9 @@ test_run:cmd("delete server replica")
 -- deleted.
 --
 s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 s:auto_increment{}
 
 check_wal_count(5)

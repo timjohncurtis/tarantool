@@ -39,6 +39,7 @@ box.space.test:auto_increment{'after snapshot - one more row'}
 --
 -- save snapshot and remove xlogs
 -- 
+box.internal.wal_rotate()
 box.snapshot()
 fio = require('fio')
 glob = fio.pathjoin(box.cfg.wal_dir, '*.xlog')

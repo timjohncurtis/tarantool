@@ -32,9 +32,8 @@ _ = box.schema.space.create('test'):create_index('pk')
 ---
 ...
 -- generate a new xlog
-box.snapshot()
+box.internal.wal_rotate()
 ---
-- ok
 ...
 lsn = box.info.lsn
 ---
@@ -57,9 +56,8 @@ box.begin() for i = 5, 8 do box.space.test:replace({i}) end box.commit()
 ---
 ...
 -- open a new xlog
-box.snapshot()
+box.internal.wal_rotate()
 ---
-- ok
 ...
 -- read a previous one
 lsn_str = tostring(lsn)

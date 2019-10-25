@@ -17,7 +17,7 @@ test_run:cmd("setopt delimiter ''");
 -- gh-2798 check for journal transaction encoding
 _ = box.schema.space.create('test'):create_index('pk')
 -- generate a new xlog
-box.snapshot()
+box.internal.wal_rotate()
 lsn = box.info.lsn
 -- autocommit transaction
 box.space.test:replace({1})
@@ -28,7 +28,7 @@ box.begin() for i = 3, 4 do box.space.test:replace({i}) end box.commit()
 -- four row transaction
 box.begin() for i = 5, 8 do box.space.test:replace({i}) end box.commit()
 -- open a new xlog
-box.snapshot()
+box.internal.wal_rotate()
 -- read a previous one
 lsn_str = tostring(lsn)
 data = read_xlog(fio.pathjoin(box.cfg.wal_dir, string.rep('0', 20 - #lsn_str) .. tostring(lsn_str) .. '.xlog'))

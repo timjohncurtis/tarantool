@@ -35,9 +35,9 @@ box.error.injection.set("ERRINJ_RELAY_REPORT_INTERVAL", 0.05)
 s = box.schema.space.create('test', {engine = engine});
 _ = s:create_index('pk', {run_count_per_level = 1})
 for i = 1, 50 do s:auto_increment{} end
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 for i = 1, 50 do s:auto_increment{} end
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 for i = 1, 100 do s:auto_increment{} end
 
 -- Make sure replica join will take long enough for us to
@@ -50,7 +50,7 @@ box.error.injection.set("ERRINJ_RELAY_SEND_DELAY", true)
 test_run:cmd("setopt delimiter ';'")
 fiber.create(function()
     fiber.sleep(0.1)
-    box.snapshot()
+    box.internal.wal_rotate() box.snapshot()
     box.error.injection.set("ERRINJ_RELAY_SEND_DELAY", false)
 end)
 test_run:cmd("setopt delimiter ''");
@@ -79,13 +79,13 @@ box.error.injection.set("ERRINJ_RELAY_SEND_DELAY", true)
 -- only require 1 xlog and that case would be
 -- indistinguishable from wrong operation.
 for i = 1, 50 do s:auto_increment{} end
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 for i = 1, 50 do s:auto_increment{} end
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 
 -- Invoke garbage collection. Check that it doesn't remove
 -- xlogs needed by the replica.
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 wait_gc(1) or box.info.gc()
 wait_xlog(2) or fio.listdir('./master')
 
@@ -114,7 +114,7 @@ box.error.injection.set("ERRINJ_WAL_DELAY", true)
 test_run:cmd("switch default")
 -- Generate some data on the master.
 for i = 1, 5 do s:auto_increment{} end
-box.snapshot() -- rotate xlog
+box.internal.wal_rotate() box.snapshot() -- wal_rotate xlog
 for i = 1, 5 do s:auto_increment{} end
 fiber.sleep(0.1) -- wait for master to relay data
 -- Garbage collection must not delete the old xlog file
@@ -146,9 +146,9 @@ test_run:cmd("cleanup server replica")
 -- with no insertions after it the replica would need only
 -- 1 xlog, which is stored anyways.
 _ = s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 _ = s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 wait_gc(1) or box.info.gc()
 wait_xlog(2) or fio.listdir('./master')
 
@@ -162,12 +162,12 @@ wait_xlog(1) or fio.listdir('./master')
 --
 s:truncate()
 for i = 1, 10 do s:replace{i} end
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 
 replica_set.join(test_run, 3)
 replica_set.stop_all(test_run)
 
-for i = 11, 50 do s:replace{i} if i % 10 == 0 then box.snapshot() end end
+for i = 11, 50 do s:replace{i} if i % 10 == 0 then box.internal.wal_rotate() box.snapshot() end end
 
 replica_set.start_all(test_run)
 replica_set.wait_all(test_run)
@@ -190,17 +190,17 @@ box.cfg{replication = replica_port}
 test_run:cmd("stop server replica")
 test_run:cmd("cleanup server replica")
 _ = s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 _ = s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 _ = s:auto_increment{}
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 wait_xlog(3) or fio.listdir('./master')
 
 -- Delete the replica from the cluster table and check that
 -- all xlog files are removed.
 test_run:cleanup_cluster()
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 wait_xlog(0, 10) or fio.listdir('./master')
 
 -- Restore the config.
@@ -227,7 +227,7 @@ for i = 1, 4 do
     for j = 1, 100 do
         s:replace{1, i, j}
     end
-    box.snapshot()
+    box.internal.wal_rotate() box.snapshot()
 end;
 test_run:cmd("setopt delimiter ''");
 

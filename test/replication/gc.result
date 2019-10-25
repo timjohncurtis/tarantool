@@ -69,16 +69,14 @@ _ = s:create_index('pk', {run_count_per_level = 1})
 for i = 1, 50 do s:auto_increment{} end
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 for i = 1, 50 do s:auto_increment{} end
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 for i = 1, 100 do s:auto_increment{} end
 ---
@@ -98,7 +96,7 @@ test_run:cmd("setopt delimiter ';'")
 ...
 fiber.create(function()
     fiber.sleep(0.1)
-    box.snapshot()
+    box.internal.wal_rotate() box.snapshot()
     box.error.injection.set("ERRINJ_RELAY_SEND_DELAY", false)
 end)
 test_run:cmd("setopt delimiter ''");
@@ -151,22 +149,19 @@ box.error.injection.set("ERRINJ_RELAY_SEND_DELAY", true)
 for i = 1, 50 do s:auto_increment{} end
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 for i = 1, 50 do s:auto_increment{} end
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 -- Invoke garbage collection. Check that it doesn't remove
 -- xlogs needed by the replica.
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 wait_gc(1) or box.info.gc()
 ---
@@ -231,9 +226,8 @@ test_run:cmd("switch default")
 for i = 1, 5 do s:auto_increment{} end
 ---
 ...
-box.snapshot() -- rotate xlog
+box.internal.wal_rotate() box.snapshot() -- wal_rotate xlog
 ---
-- ok
 ...
 for i = 1, 5 do s:auto_increment{} end
 ---
@@ -307,16 +301,14 @@ test_run:cmd("cleanup server replica")
 _ = s:auto_increment{}
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 _ = s:auto_increment{}
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 wait_gc(1) or box.info.gc()
 ---
@@ -348,9 +340,8 @@ s:truncate()
 for i = 1, 10 do s:replace{i} end
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 replica_set.join(test_run, 3)
 ---
@@ -358,7 +349,7 @@ replica_set.join(test_run, 3)
 replica_set.stop_all(test_run)
 ---
 ...
-for i = 11, 50 do s:replace{i} if i % 10 == 0 then box.snapshot() end end
+for i = 11, 50 do s:replace{i} if i % 10 == 0 then box.internal.wal_rotate() box.snapshot() end end
 ---
 ...
 replica_set.start_all(test_run)
@@ -405,23 +396,20 @@ test_run:cmd("cleanup server replica")
 _ = s:auto_increment{}
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 _ = s:auto_increment{}
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 _ = s:auto_increment{}
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 wait_xlog(3) or fio.listdir('./master')
 ---
@@ -432,9 +420,8 @@ wait_xlog(3) or fio.listdir('./master')
 test_run:cleanup_cluster()
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 wait_xlog(0, 10) or fio.listdir('./master')
 ---
@@ -480,7 +467,7 @@ for i = 1, 4 do
     for j = 1, 100 do
         s:replace{1, i, j}
     end
-    box.snapshot()
+    box.internal.wal_rotate() box.snapshot()
 end;
 ---
 ...

@@ -60,9 +60,8 @@ s = box.schema.space.create('test', {engine = engine})
 _ = s:create_index('pk')
 ---
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 --
 -- Create a few dead replicas to pin WAL files.
@@ -87,9 +86,8 @@ s:auto_increment{}
 ---
 - [1]
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 test_run:cmd("start server replica")
 ---
@@ -107,9 +105,8 @@ s:auto_increment{}
 ---
 - [2]
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 test_run:cmd("start server replica")
 ---
@@ -135,17 +132,15 @@ s:auto_increment{}
 ---
 - [3]
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 s:auto_increment{}
 ---
 - [4]
 ...
-box.snapshot()
+box.internal.wal_rotate() box.snapshot()
 ---
-- ok
 ...
 s:auto_increment{}
 ---

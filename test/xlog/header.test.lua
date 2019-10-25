@@ -31,6 +31,7 @@ xlog_name = string.format("%020d.xlog", checkpoint_lsn)
 dump_header(fio.pathjoin(box.cfg.wal_dir, xlog_name))
 box.space._schema:delete({"layout_test"})
 
+box.internal.wal_rotate()
 box.snapshot()
 checkpoint_lsn = box.info.lsn
 
@@ -44,6 +45,7 @@ xlog_name = string.format("%020d.xlog", checkpoint_lsn)
 dump_header(fio.pathjoin(box.cfg.wal_dir, xlog_name))
 box.space._schema:delete({"layout_test"})
 
+box.internal.wal_rotate()
 box.snapshot()
 checkpoint_lsn = box.info.lsn
 
