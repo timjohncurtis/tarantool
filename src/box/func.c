@@ -577,8 +577,8 @@ void
 func_delete(struct func *func)
 {
 	struct func_def *def = func->def;
-	func->vtab->destroy(func);
 	credentials_destroy(&func->owner_credentials);
+	func->vtab->destroy(func);
 	free(def);
 }
 
