@@ -332,7 +332,7 @@ recover_remaining_wals(struct recovery *r, struct xstream *stream,
 			  r->cursor.name);
 	}
 
-	for (clock = vclockset_match(&r->wal_dir.index, &r->vclock);
+	for (clock = vclockset_psearch(&r->wal_dir.index, &r->vclock);
 	     clock != NULL;
 	     clock = vclockset_next(&r->wal_dir.index, clock)) {
 		if (stop_vclock != NULL &&

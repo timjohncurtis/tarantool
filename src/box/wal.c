@@ -1654,7 +1654,10 @@ wal_relay_from_file(struct wal_writer *writer, struct vclock *vclock,
 						 vclock);
 	if (recovery == NULL)
 		return -1;
-	if (recover_remaining_wals(recovery, stream, NULL, true) != 0) {
+	struct vclock stop_vclock;
+	vclock_create(&stop_vclock);
+	vclock_copy(&stop_vclock, &writer->vclock);
+	if (recover_remaining_wals(recovery, stream, &stop_vclock, true) != 0) {
 		recovery_delete(recovery);
 		return -1;
 	}
