@@ -314,7 +314,7 @@ xrow_buf_cursor_create(struct xrow_buf *xrow_buf,
 			xrow_buf->chunk + xrow_buf->first_chunk_index %
 					  XROW_BUF_CHUNK_COUNT;
 	int rc = vclock_compare(&chunk->vclock, vclock);
-	if (rc >= 0 || rc == VCLOCK_ORDER_UNDEFINED) {
+	if (rc > 0 || rc == VCLOCK_ORDER_UNDEFINED) {
 		/* The requested data was discarded. */
 		return -1;
 	}
