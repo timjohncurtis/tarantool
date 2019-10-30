@@ -75,6 +75,8 @@ struct journal_entry {
 	 * Approximate size of this request when encoded.
 	 */
 	size_t approx_len;
+	/** This journal entry starting vclock. */
+	struct vclock *sync_vclock;
 	/**
 	 * The number of rows in the request.
 	 */

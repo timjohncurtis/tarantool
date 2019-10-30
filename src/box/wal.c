@@ -620,14 +620,10 @@ wal_begin_checkpoint(struct vclock *vclock)
 {
 	size_t region_svp = region_used(&fiber()->gc);
 	struct journal_entry *entry;
-	entry = journal_entry_new(1, &fiber()->gc, wal_begin_checkpoint_done, fiber());
-	entry->n_rows = 0;
-	entry->res = -1;
-	*(struct vclock **)entry->rows = vclock;
+	entry = journal_entry_new(0, &fiber()->gc, wal_begin_checkpoint_done, fiber());
+	entry->sync_vclock = vclock;
 	if (wal_write(current_journal, entry) == 0)
 		fiber_yield();
-	if (entry->res >= 0)
-		vclock_copy(vclock, (struct vclock *)entry->rows[0]);
 	int64_t res = entry->res;
 	region_truncate(&fiber()->gc, region_svp);
 	if (res < 0) {
@@ -1062,21 +1058,6 @@ wal_write_to_disk(struct cmsg *msg)
 	/* Start a wal memory buffer transaction. */
 	xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 	stailq_foreach_entry(entry, &wal_msg->commit, fifo) {
-		if (entry->n_rows == 0) {
-			rc = xlog_flush(l);
-			if (rc < 0) {
-				xrow_buf_tx_rollback(&writer->xrow_buf);
-				goto done;
-			}
-			writer->checkpoint_wal_size += rc;
-			last_committed = &entry->fifo;
-			vclock_merge(&writer->vclock, &vclock_diff);
-			entry->res = vclock_sum(&writer->vclock);
-			xrow_buf_tx_commit(&writer->xrow_buf);
-			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
-
-			vclock_copy((struct vclock *)entry->rows[0], &writer->vclock);
-		}
 		wal_assign_lsn(&vclock_diff, &writer->vclock,
 			       entry->rows, entry->rows + entry->n_rows);
 		entry->res = vclock_sum(&vclock_diff) +
@@ -1095,6 +1076,8 @@ wal_write_to_disk(struct cmsg *msg)
 			goto done;
 		}
 		rc = xlog_tx_commit(l);
+		if (entry->sync_vclock != NULL && rc == 0)
+			rc = xlog_flush(l);
 		if (rc < 0) {
 			/* Failed write. */
 			xrow_buf_tx_rollback(&writer->xrow_buf);
@@ -1111,6 +1094,8 @@ wal_write_to_disk(struct cmsg *msg)
 			xrow_buf_tx_commit(&writer->xrow_buf);
 			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 		}
+		if (entry->sync_vclock != NULL)
+			vclock_copy(entry->sync_vclock, &writer->vclock);
 		/* rc == 0: the write is buffered in xlog_tx */
 	}
 
