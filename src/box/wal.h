@@ -178,22 +178,6 @@ wal_mode();
 int
 wal_sync(void);
 
-struct wal_checkpoint {
-	struct cbus_call_msg base;
-	/**
-	 * VClock of the last record written to the rotated WAL.
-	 * This is the vclock that is supposed to be used to
-	 * identify the new checkpoint.
-	 */
-	struct vclock vclock;
-	/**
-	 * Size of WAL files written since the last checkpoint.
-	 * Used to reset the corresponding WAL counter upon
-	 * successful checkpoint creation.
-	 */
-	int64_t wal_size;
-};
-
 /**
  * Prepare WAL for checkpointing.
  *
@@ -203,7 +187,7 @@ struct wal_checkpoint {
  * upon successful checkpoint creation.
  */
 int
-wal_begin_checkpoint(struct wal_checkpoint *checkpoint);
+wal_begin_checkpoint(struct vclock *vclock);
 
 /**
  * This function is called upon successful checkpoint creation.
@@ -211,7 +195,7 @@ wal_begin_checkpoint(struct wal_checkpoint *checkpoint);
  * vclock.
  */
 void
-wal_commit_checkpoint(struct wal_checkpoint *checkpoint);
+wal_commit_checkpoint(struct vclock *vclock);
 
 int
 wal_rotate();

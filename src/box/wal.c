@@ -145,14 +145,6 @@ struct wal_writer
 	 * time to trigger checkpointing.
 	 */
 	int64_t checkpoint_threshold;
-	/**
-	 * This flag is set if the WAL thread has notified TX that
-	 * the checkpoint threshold has been exceeded. It is cleared
-	 * on checkpoint completion. Needed in order not to invoke
-	 * the TX callback over and over again while checkpointing
-	 * is in progress.
-	 */
-	bool checkpoint_triggered;
 	/** The current WAL file. */
 	struct xlog current_wal;
 	/**
@@ -393,7 +385,6 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 
 	writer->checkpoint_wal_size = 0;
 	writer->checkpoint_threshold = INT64_MAX;
-	writer->checkpoint_triggered = false;
 
 	vclock_create(&writer->vclock);
 	vclock_create(&writer->checkpoint_vclock);
@@ -617,59 +608,44 @@ wal_rotate()
 	return 0;
 }
 
-static int
-wal_begin_checkpoint_f(struct cbus_call_msg *data)
+static void
+wal_begin_checkpoint_done(struct journal_entry *entry, void *data)
 {
-	struct wal_checkpoint *msg = (struct wal_checkpoint *) data;
-	struct wal_writer *writer = &wal_writer_singleton;
-	if (writer->in_rollback.route != NULL) {
-		/*
-		 * We're rolling back a failed write and so
-		 * can't make a checkpoint - see the comment
-		 * in wal_begin_checkpoint() for the explanation.
-		 */
-		diag_set(ClientError, ER_CHECKPOINT_ROLLBACK);
-		return -1;
-	}
-	vclock_copy(&msg->vclock, &writer->vclock);
-	msg->wal_size = writer->checkpoint_wal_size;
-	return 0;
+	(void) entry;
+	fiber_wakeup((struct fiber *)data);
 }
 
 int
-wal_begin_checkpoint(struct wal_checkpoint *checkpoint)
+wal_begin_checkpoint(struct vclock *vclock)
 {
-	struct wal_writer *writer = &wal_writer_singleton;
-	if (writer->wal_mode == WAL_NONE) {
-		vclock_copy(&checkpoint->vclock, &writer->vclock);
-		checkpoint->wal_size = 0;
-		return 0;
-	}
-	if (!stailq_empty(&writer->rollback)) {
-		/*
-		 * If cascading rollback is in progress, in-memory
-		 * indexes can contain changes scheduled for rollback.
-		 * If we made a checkpoint, we could write them to
-		 * the snapshot. So we abort checkpointing in this
-		 * case.
-		 */
+	size_t region_svp = region_used(&fiber()->gc);
+	struct journal_entry *entry;
+	entry = journal_entry_new(1, &fiber()->gc, wal_begin_checkpoint_done, fiber());
+	entry->n_rows = 0;
+	entry->res = -1;
+	*(struct vclock **)entry->rows = vclock;
+	if (wal_write(current_journal, entry) == 0)
+		fiber_yield();
+	if (entry->res >= 0)
+		vclock_copy(vclock, (struct vclock *)entry->rows[0]);
+	int64_t res = entry->res;
+	region_truncate(&fiber()->gc, region_svp);
+	if (res < 0) {
 		diag_set(ClientError, ER_CHECKPOINT_ROLLBACK);
 		return -1;
 	}
-	bool cancellable = fiber_set_cancellable(false);
-	int rc = cbus_call(&writer->wal_pipe, &writer->tx_prio_pipe,
-			   &checkpoint->base, wal_begin_checkpoint_f, NULL,
-			   TIMEOUT_INFINITY);
-	fiber_set_cancellable(cancellable);
-	if (rc != 0)
-		return -1;
 	return 0;
 }
+
+struct wal_commit_msg {
+	struct cbus_call_msg base;
+	struct vclock *vclock;
+};
 
 static int
 wal_commit_checkpoint_f(struct cbus_call_msg *data)
 {
-	struct wal_checkpoint *msg = (struct wal_checkpoint *) data;
+	struct wal_commit_msg *msg = (struct wal_commit_msg *) data;
 	struct wal_writer *writer = &wal_writer_singleton;
 	/*
 	 * Now, once checkpoint has been created, we can update
@@ -681,24 +657,23 @@ wal_commit_checkpoint_f(struct cbus_call_msg *data)
 	 * when checkpointing started from the current value
 	 * rather than just setting it to 0.
 	 */
-	vclock_copy(&writer->checkpoint_vclock, &msg->vclock);
-	assert(writer->checkpoint_wal_size >= msg->wal_size);
-	writer->checkpoint_wal_size -= msg->wal_size;
-	writer->checkpoint_triggered = false;
+	vclock_copy(&writer->checkpoint_vclock, msg->vclock);
 	return 0;
 }
 
 void
-wal_commit_checkpoint(struct wal_checkpoint *checkpoint)
+wal_commit_checkpoint(struct vclock *vclock)
 {
 	struct wal_writer *writer = &wal_writer_singleton;
 	if (writer->wal_mode == WAL_NONE) {
-		vclock_copy(&writer->checkpoint_vclock, &checkpoint->vclock);
+		vclock_copy(&writer->checkpoint_vclock, vclock);
 		return;
 	}
 	bool cancellable = fiber_set_cancellable(false);
+	struct wal_commit_msg msg;
+	msg.vclock = vclock;
 	cbus_call(&writer->wal_pipe, &writer->tx_prio_pipe,
-		  &checkpoint->base, wal_commit_checkpoint_f, NULL,
+		  &msg.base, wal_commit_checkpoint_f, NULL,
 		  TIMEOUT_INFINITY);
 	fiber_set_cancellable(cancellable);
 }
@@ -1087,6 +1062,21 @@ wal_write_to_disk(struct cmsg *msg)
 	/* Start a wal memory buffer transaction. */
 	xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 	stailq_foreach_entry(entry, &wal_msg->commit, fifo) {
+		if (entry->n_rows == 0) {
+			rc = xlog_flush(l);
+			if (rc < 0) {
+				xrow_buf_tx_rollback(&writer->xrow_buf);
+				goto done;
+			}
+			writer->checkpoint_wal_size += rc;
+			last_committed = &entry->fifo;
+			vclock_merge(&writer->vclock, &vclock_diff);
+			entry->res = vclock_sum(&writer->vclock);
+			xrow_buf_tx_commit(&writer->xrow_buf);
+			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
+
+			vclock_copy((struct vclock *)entry->rows[0], &writer->vclock);
+		}
 		wal_assign_lsn(&vclock_diff, &writer->vclock,
 			       entry->rows, entry->rows + entry->n_rows);
 		entry->res = vclock_sum(&vclock_diff) +
@@ -1141,8 +1131,7 @@ wal_write_to_disk(struct cmsg *msg)
 	 * don't panic on error, because if we fail to send the
 	 * message now, we will retry next time we process a request.
 	 */
-	if (!writer->checkpoint_triggered &&
-	    writer->checkpoint_wal_size > writer->checkpoint_threshold) {
+	if (writer->checkpoint_wal_size > writer->checkpoint_threshold) {
 		static struct cmsg_hop route[] = {
 			{ tx_notify_checkpoint, NULL },
 		};
@@ -1150,7 +1139,8 @@ wal_write_to_disk(struct cmsg *msg)
 		if (msg != NULL) {
 			cmsg_init(msg, route);
 			cpipe_push(&writer->tx_prio_pipe, msg);
-			writer->checkpoint_triggered = true;
+			writer->checkpoint_wal_size -=
+				writer->checkpoint_threshold;
 		} else {
 			say_warn("failed to allocate checkpoint "
 				 "notification message");

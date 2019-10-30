@@ -87,7 +87,7 @@ box.internal.wal_rotate() box.snapshot()
 -- xlogs needed by the replica.
 box.internal.wal_rotate() box.snapshot()
 wait_gc(1) or box.info.gc()
-wait_xlog(2) or fio.listdir('./master')
+wait_xlog(3) or fio.listdir('./master')
 
 -- Resume replication so that the replica catches
 -- up quickly.
@@ -102,7 +102,7 @@ test_run:cmd("switch default")
 -- Now garbage collection should resume and delete files left
 -- from the old checkpoint.
 wait_gc(1) or box.info.gc()
-wait_xlog(0) or fio.listdir('./master')
+wait_xlog(1) or fio.listdir('./master')
 --
 -- Check that the master doesn't delete xlog files sent to the
 -- replica until it receives a confirmation that the data has
@@ -150,7 +150,7 @@ box.internal.wal_rotate() box.snapshot()
 _ = s:auto_increment{}
 box.internal.wal_rotate() box.snapshot()
 wait_gc(1) or box.info.gc()
-wait_xlog(2) or fio.listdir('./master')
+wait_xlog(3) or fio.listdir('./master')
 
 -- The xlog should only be deleted after the replica
 -- is unregistered.
@@ -195,13 +195,13 @@ _ = s:auto_increment{}
 box.internal.wal_rotate() box.snapshot()
 _ = s:auto_increment{}
 box.internal.wal_rotate() box.snapshot()
-wait_xlog(3) or fio.listdir('./master')
+wait_xlog(4) or fio.listdir('./master')
 
 -- Delete the replica from the cluster table and check that
 -- all xlog files are removed.
 test_run:cleanup_cluster()
 box.internal.wal_rotate() box.snapshot()
-wait_xlog(0, 10) or fio.listdir('./master')
+wait_xlog(1, 10) or fio.listdir('./master')
 
 -- Restore the config.
 box.cfg{replication = {}}

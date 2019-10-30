@@ -362,7 +362,8 @@ recover_current_wal:
 	if (xlog_cursor_is_eof(&r->cursor))
 		recovery_close_log(r);
 
-	if (stop_vclock != NULL && vclock_compare(&r->vclock, stop_vclock) != 0) {
+	if (stop_vclock != NULL &&
+	    vclock_compare(&r->vclock, stop_vclock) != 0) {
 		diag_set(XlogGapError, &r->vclock, stop_vclock);
 		return -1;
 	}
