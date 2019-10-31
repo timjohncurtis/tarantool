@@ -63,6 +63,9 @@ mclock_detach(struct mclock *mclock, uint32_t id);
 int
 mclock_update(struct mclock *mclock, uint32_t id, const struct vclock *vclock);
 
+int
+mclock_get(struct mclock *mclock, int32_t offset, struct vclock *vclock);
+
 #if defined(__cplusplus)
 } /* extern "C" */
 #endif /* defined(__cplusplus) */
