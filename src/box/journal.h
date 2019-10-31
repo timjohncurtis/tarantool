@@ -34,6 +34,8 @@
 #include <stdbool.h>
 #include "salad/stailq.h"
 #include "fiber.h"
+#include "cbus.h"
+#include "vclock.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -53,6 +55,7 @@ typedef void (*journal_entry_done_cb)(struct journal_entry *entry, void *data);
  * first to a Raft leader before going to the local WAL.
  */
 struct journal_entry {
+	struct cmsg msg;
 	/** A helper to include requests into a FIFO queue. */
 	struct stailq_entry fifo;
 	/**
@@ -76,7 +79,8 @@ struct journal_entry {
 	 */
 	size_t approx_len;
 	/** This journal entry starting vclock. */
-	struct vclock *sync_vclock;
+	struct vclock vclock;
+	bool is_sync;
 	/**
 	 * The number of rows in the request.
 	 */
