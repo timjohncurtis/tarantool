@@ -171,6 +171,9 @@ struct wal_writer
 	size_t write_queue_len;
 	struct fiber_cond write_cond;
 
+	struct stailq commit_queue;
+	struct fiber_cond commit_cond;
+
 	struct journal_entry *last_entry;
 	struct stailq rollback_queue;
 
@@ -348,6 +351,9 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 	stailq_create(&writer->write_queue);
 	fiber_cond_create(&writer->write_cond);
 	stailq_create(&writer->rollback_queue);
+
+	stailq_create(&writer->commit_queue);
+	fiber_cond_create(&writer->commit_cond);
 	writer->last_entry = 0;
 }
 
@@ -1004,15 +1010,10 @@ wal_write_to_disk(struct wal_writer *writer)
 			xrow_buf_tx_commit(&writer->xrow_buf);
 			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
 			fiber_cond_broadcast(&writer->xrow_buf_cond);
-			struct journal_entry *flushed_entry;
-			do {
-				flushed_entry =
-					stailq_shift_entry(&writer->write_queue,
-							   struct journal_entry,
-							   fifo);
-				cmsg_init(&flushed_entry->msg, tx_commit_route);
-				cpipe_push(&writer->tx_prio_pipe, &flushed_entry->msg);
-			} while (flushed_entry != entry);
+			struct stailq write_queue;
+			stailq_cut_tail(&writer->write_queue, &entry->fifo, &write_queue);
+			stailq_concat(&writer->commit_queue, &writer->write_queue);
+			stailq_concat(&writer->write_queue, &write_queue);
 		}
 		/* rc == 0: the write is buffered in xlog_tx */
 	}
@@ -1069,6 +1070,7 @@ done:
 			   &writer->update_wal_vclock_msg.base);
 	}
 	mclock_attach(&writer->mclock, instance_id, &writer->vclock);
+	fiber_cond_signal(&writer->commit_cond);
 }
 
 static int
@@ -1085,14 +1087,34 @@ wal_write_f(va_list ap)
 	return 0;
 }
 
+static int
+wal_commit_f(va_list ap)
+{
+	struct wal_writer *writer = va_arg(ap, struct wal_writer *);
+	while (!fiber_is_cancelled()) {
+		if (stailq_empty(&writer->commit_queue)) {
+			fiber_cond_wait(&writer->commit_cond);
+			continue;
+		}
+		struct journal_entry *entry, *tmp;
+		stailq_foreach_entry_safe(entry, tmp, &writer->commit_queue, fifo) {
+			entry = stailq_shift_entry(&writer->commit_queue, struct journal_entry, fifo);
+			cmsg_init(&entry->msg, tx_commit_route);
+			cpipe_push(&writer->tx_prio_pipe, &entry->msg);
+		}
+	}
+	return 0;
+}
+
 static void
 wal_queue_journal_entry(struct cmsg *msg)
 {
 	struct wal_writer *writer = &wal_writer_singleton;
 	struct journal_entry *entry =
 		container_of(msg, struct journal_entry, msg);
-	if (stailq_empty(&writer->write_queue))
+	if (stailq_empty(&writer->write_queue)) {
 		fiber_cond_signal(&writer->write_cond);
+	}
 	stailq_add_tail(&writer->write_queue, &entry->fifo);
 	writer->write_queue_len += entry->approx_len;
 }
@@ -1124,10 +1146,17 @@ wal_writer_f(va_list ap)
 	fiber_set_joinable(write_fiber, true);
 	fiber_start(write_fiber, writer);
 
+	struct fiber *commit_fiber = fiber_new("wal_writer", wal_commit_f);
+	fiber_set_joinable(commit_fiber, true);
+	fiber_start(commit_fiber, writer);
+
 	cbus_loop(&endpoint);
 
 	fiber_cancel(write_fiber);
 	fiber_join(write_fiber);
+
+	fiber_cancel(commit_fiber);
+	fiber_join(commit_fiber);
 
 	/*
 	 * Create a new empty WAL on shutdown so that we don't
