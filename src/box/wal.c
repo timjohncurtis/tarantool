@@ -175,7 +175,7 @@ struct wal_writer
 	struct stailq commit_queue;
 	struct fiber_cond commit_cond;
 
-
+	uint32_t write_majority;
 };
 
 /**
@@ -353,6 +353,8 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 
 	stailq_create(&writer->commit_queue);
 	fiber_cond_create(&writer->commit_cond);
+
+	writer->write_majority = 1;
 }
 
 /** Destroy a WAL writer structure. */
@@ -1075,13 +1077,24 @@ wal_commit_f(va_list ap)
 {
 	struct wal_writer *writer = va_arg(ap, struct wal_writer *);
 	while (!fiber_is_cancelled()) {
-		if (stailq_empty(&writer->commit_queue)) {
+		struct vclock write_vclock;
+		if (stailq_empty(&writer->commit_queue) ||
+			mclock_get(&writer->mclock, writer->write_majority - 1,
+				   &write_vclock) != 0) {
 			fiber_cond_wait(&writer->commit_cond);
 			continue;
 		}
 		struct journal_entry *entry, *tmp;
+		bool first_entry = true;
 		stailq_foreach_entry_safe(entry, tmp, &writer->commit_queue, fifo) {
 			entry = stailq_shift_entry(&writer->commit_queue, struct journal_entry, fifo);
+			int cmp = vclock_compare(&entry->vclock, &write_vclock);
+			if (cmp == VCLOCK_ORDER_UNDEFINED || cmp > 0) {
+				if (first_entry)
+					fiber_cond_wait(&writer->commit_cond);
+				break;
+			}
+			first_entry = false;
 			cmsg_init(&entry->msg, tx_commit_route);
 			cpipe_push(&writer->tx_prio_pipe, &entry->msg);
 		}
