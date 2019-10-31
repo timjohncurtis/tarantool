@@ -104,14 +104,17 @@ mclock_update(struct mclock *mclock, uint32_t id, const struct vclock *vclock)
 		int64_t new_lsn = vclock_get(vclock, col_id);
 		if (vclock_get(mclock->vclock + id, col_id) == new_lsn)
 			continue;
-		uint32_t old_pos, new_pos = 0;
-		for (uint32_t i = 0; i < count; ++i) {
-			uint32_t replica_id = mclock->order[col_id][i];
+		int32_t old_pos = -1, new_pos = count - 1, pos = count;
+		do {
+			--pos;
+			uint32_t replica_id = mclock->order[col_id][pos];
 			if (replica_id == id)
-				old_pos = i;
-			if (vclock_get(mclock->vclock + replica_id, col_id) > new_lsn)
-				new_pos = i;
-		}
+				old_pos = pos;
+			if (vclock_get(mclock->vclock + replica_id, col_id) <
+			    new_lsn)
+				new_pos = pos;
+		} while (pos > 0);
+		assert(old_pos != -1);
 		if (old_pos == new_pos)
 			continue;
 		if (old_pos > new_pos) {

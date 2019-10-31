@@ -1112,6 +1112,7 @@ wal_writer_f(va_list ap)
 	fiber_cond_create(&writer->xrow_buf_cond);
 	mclock_create(&writer->mclock);
 	mclock_attach(&writer->mclock, instance_id, &writer->vclock);
+	fiber_cond_signal(&writer->commit_cond);
 
 	/** Initialize eio in this thread */
 	coio_enable();
