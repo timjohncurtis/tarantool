@@ -97,7 +97,8 @@ struct wal_writer
 	 * in wal_write() so that new requests never enter
 	 * the wal-tx bus and are rolled back "on arrival".
 	 */
-	struct stailq rollback;
+	struct stailq rollback_queue;
+	struct journal_entry *last_entry;
 	/** A pipe from 'tx' thread to 'wal' */
 	struct cpipe wal_pipe;
 	/* ----------------- wal ------------------- */
@@ -174,8 +175,6 @@ struct wal_writer
 	struct stailq commit_queue;
 	struct fiber_cond commit_cond;
 
-	struct journal_entry *last_entry;
-	struct stailq rollback_queue;
 
 };
 
@@ -335,7 +334,8 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 	if (wal_mode == WAL_FSYNC)
 		writer->wal_dir.open_wflags |= O_SYNC;
 
-	stailq_create(&writer->rollback);
+	writer->last_entry = NULL;
+	stailq_create(&writer->rollback_queue);
 	writer->is_in_rollback = false;
 
 	writer->checkpoint_wal_size = 0;
@@ -350,11 +350,9 @@ wal_writer_create(struct wal_writer *writer, enum wal_mode wal_mode,
 
 	stailq_create(&writer->write_queue);
 	fiber_cond_create(&writer->write_cond);
-	stailq_create(&writer->rollback_queue);
 
 	stailq_create(&writer->commit_queue);
 	fiber_cond_create(&writer->commit_cond);
-	writer->last_entry = 0;
 }
 
 /** Destroy a WAL writer structure. */
@@ -843,19 +841,19 @@ wal_writer_end_rollback(struct cmsg *msg)
 }
 
 static void
-wal_writer_begin_rollback(struct wal_writer *writer)
+wal_writer_begin_rollback(struct wal_writer *writer, struct stailq *queue)
 {
 	static struct cmsg_hop rollback_route[] = {
 		{tx_schedule_rollback, NULL},
 	};
-	writer->is_in_rollback = true;
-	struct journal_entry *entry, *tmp;
-	stailq_foreach_entry_safe(entry, tmp, &writer->write_queue, fifo) {
+	struct journal_entry *entry;
+	stailq_foreach_entry(entry, queue, fifo) {
 		entry->res = -1;
 		cmsg_init(&entry->msg, rollback_route);
 		cpipe_push(&writer->tx_prio_pipe, &entry->msg);
 	}
-	stailq_create(&writer->write_queue);
+	stailq_create(queue);
+	writer->is_in_rollback = true;
 	writer->write_queue_len = 0;
 }
 
@@ -912,7 +910,7 @@ tx_update_wal_vclock(struct cmsg *base)
 }
 
 static void
-wal_write_to_disk(struct wal_writer *writer)
+wal_write_batch(struct wal_writer *writer)
 {
 	struct error *error;
 
@@ -927,11 +925,6 @@ wal_write_to_disk(struct wal_writer *writer)
 
 	ERROR_INJECT_SLEEP(ERRINJ_WAL_DELAY);
 
-	if (writer->is_in_rollback ||
-	    wal_opt_rotate(writer) != 0 ||
-	    wal_fallocate(writer, writer->write_queue_len)) {
-		return wal_writer_begin_rollback(writer);
-	}
 
 	/*
 	 * This code tries to write queued requests (=transactions) using as
@@ -959,63 +952,50 @@ wal_write_to_disk(struct wal_writer *writer)
 	/*
 	 * Iterate over requests (transactions)
 	 */
-	int rc;
-	struct journal_entry *entry, *tmp;
+	int rc = 0;
+	struct journal_entry *entry;
+	struct stailq pending;
+	stailq_create(&pending);
 	/* Start a wal memory buffer transaction. */
 	xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
-	stailq_foreach_entry_safe(entry, tmp, &writer->write_queue, fifo) {
+	while (!stailq_empty(&writer->write_queue)) {
+		entry = stailq_shift_entry(&writer->write_queue,
+					   struct journal_entry, fifo);
+		stailq_add_tail(&pending, &entry->fifo);
 		writer->write_queue_len -= entry->approx_len;
 		wal_assign_lsn(&vclock_diff, prev_vclock,
 			       entry->rows, entry->rows + entry->n_rows);
-		entry->res = vclock_sum(&vclock_diff) +
-			     vclock_sum(prev_vclock);
-		struct iovec *iov;
-		int iovcnt = xrow_buf_write(&writer->xrow_buf, entry->rows,
-					    entry->rows + entry->n_rows, &iov);
-		if (iovcnt < 0) {
-			xrow_buf_tx_rollback(&writer->xrow_buf);
-			goto done;
-		}
-		xlog_tx_begin(l);
-		if (xlog_write_iov(l, iov, iovcnt, entry->n_rows) < 0) {
-			xlog_tx_rollback(l);
-			xrow_buf_tx_rollback(&writer->xrow_buf);
-			goto done;
-		}
-		rc = xlog_tx_commit(l);
-		bool flushed = false;
-		if (rc == 0 && (entry->is_sync ||
-				entry == stailq_last_entry(&writer->write_queue,
-							   struct journal_entry,
-							   fifo))) {
-			rc = xlog_flush(l);
-			flushed = true;
-		}
-		if (rc < 0) {
-			/* Failed write. */
-			xrow_buf_tx_rollback(&writer->xrow_buf);
-			goto done;
-		}
 		vclock_copy(&entry->vclock, prev_vclock);
 		vclock_merge(&entry->vclock, &vclock_diff);
 		prev_vclock = &entry->vclock;
-		if (rc > 0 || flushed) {
-			/*
-			 * Data flushed to disk, start a new memory
-			 * buffer transaction
-			 */
-			writer->checkpoint_wal_size += rc;
-			vclock_copy(&writer->vclock, &entry->vclock);
-			prev_vclock = &writer->vclock;
-			xrow_buf_tx_commit(&writer->xrow_buf);
-			xrow_buf_tx_begin(&writer->xrow_buf, &writer->vclock);
-			fiber_cond_broadcast(&writer->xrow_buf_cond);
-			struct stailq write_queue;
-			stailq_cut_tail(&writer->write_queue, &entry->fifo, &write_queue);
-			stailq_concat(&writer->commit_queue, &writer->write_queue);
-			stailq_concat(&writer->write_queue, &write_queue);
+		entry->res = vclock_sum(&entry->vclock);
+		struct iovec *iov;
+		rc = xrow_buf_write(&writer->xrow_buf, entry->rows,
+				    entry->rows + entry->n_rows, &iov);
+		if (rc < 0)
+			break;
+		xlog_tx_begin(l);
+		if ((rc = xlog_write_iov(l, iov, rc, entry->n_rows)) < 0) {
+			xlog_tx_rollback(l);
+			break;
 		}
-		/* rc == 0: the write is buffered in xlog_tx */
+		rc = xlog_tx_commit(l);
+		if (rc != 0 || entry->is_sync)
+			break;
+	}
+	if (rc == 0)
+		rc = xlog_flush(l);
+	if (rc < 0) {
+		/* Failed write. */
+		xrow_buf_tx_rollback(&writer->xrow_buf);
+		stailq_concat(&pending, &writer->write_queue);
+		wal_writer_begin_rollback(writer, &pending);
+	} else {
+		writer->checkpoint_wal_size += rc;
+		vclock_copy(&writer->vclock, prev_vclock);
+		xrow_buf_tx_commit(&writer->xrow_buf);
+		fiber_cond_broadcast(&writer->xrow_buf_cond);
+		stailq_concat(&writer->commit_queue, &pending);
 	}
 
 	/*
@@ -1040,7 +1020,6 @@ wal_write_to_disk(struct wal_writer *writer)
 		}
 	}
 
-done:
 	error = diag_last_error(diag_get());
 	if (error) {
 		/* Until we can pass the error to tx, log it and clear. */
@@ -1055,8 +1034,6 @@ done:
 	 * request. Otherwise we rollback from the first request.
 	 */
 
-	if (!stailq_empty(&writer->write_queue))
-		wal_writer_begin_rollback(writer);
 	fiber_gc();
 	wal_notify_watchers(writer, WAL_EVENT_WRITE);
 	static struct cmsg_hop update_wal_vclock_route[] = {
@@ -1080,9 +1057,15 @@ wal_write_f(va_list ap)
 	while (!fiber_is_cancelled()) {
 		if (stailq_empty(&writer->write_queue)) {
 			fiber_cond_wait(&writer->write_cond);
+	if (writer->is_in_rollback ||
+	    wal_opt_rotate(writer) != 0 ||
+	    wal_fallocate(writer, writer->write_queue_len)) {
+		wal_writer_begin_rollback(writer, &writer->write_queue);
+	}
+
 			continue;
 		}
-		wal_write_to_disk(writer);
+		wal_write_batch(writer);
 	}
 	return 0;
 }
@@ -1200,7 +1183,7 @@ wal_write(struct journal *journal, struct journal_entry *entry)
 		goto fail;
 	});
 
-	if (! stailq_empty(&writer->rollback)) {
+	if (! stailq_empty(&writer->rollback_queue)) {
 		/*
 		 * The writer rollback queue is not empty,
 		 * roll back this transaction immediately.
