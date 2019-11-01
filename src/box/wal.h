@@ -229,6 +229,9 @@ wal_write_vy_log(struct journal_entry *req);
 void
 wal_rotate_vy_log();
 
+int
+wal_set_majority(uint32_t write_majority);
+
 /**
  * Wal relay maintains wal memory tracking and allows
  * to retrieve logged xrows direct from the wal memory.

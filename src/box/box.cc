@@ -898,6 +898,15 @@ box_set_net_msg_max(void)
 				IPROTO_FIBER_POOL_SIZE_FACTOR);
 }
 
+void
+box_set_wal_majority(void)
+{
+	uint32_t write_majority = cfg_geti("write_majority");
+	if (wal_set_majority(write_majority) != 0)
+		diag_raise();
+
+}
+
 /* }}} configuration bindings */
 
 /**

@@ -1240,6 +1240,32 @@ wal_write_in_wal_mode_none(struct journal *journal,
 	return 0;
 }
 
+struct wal_set_majority_msg {
+	struct cbus_call_msg base;
+	uint32_t write_majority;
+};
+
+static int
+wal_set_majority_f(struct cbus_call_msg *base)
+{
+	struct wal_set_majority_msg *msg =
+		container_of(base, struct wal_set_majority_msg, base);
+	struct wal_writer *writer = &wal_writer_singleton;
+	writer->write_majority = msg->write_majority;
+	fiber_cond_signal(&writer->commit_cond);
+	return 0;
+}
+
+int
+wal_set_majority(uint32_t write_majority)
+{
+	struct wal_set_majority_msg msg;
+	struct wal_writer *writer = &wal_writer_singleton;
+	msg.write_majority = write_majority;
+	return cbus_call(&writer->wal_pipe, &writer->tx_prio_pipe, &msg.base,
+			  wal_set_majority_f, NULL, TIMEOUT_INFINITY);
+}
+
 void
 wal_init_vy_log()
 {
