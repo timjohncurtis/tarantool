@@ -1085,9 +1085,10 @@ wal_commit_f(va_list ap)
 			continue;
 		}
 		struct journal_entry *entry, *tmp;
+		entry = stailq_first_entry(&writer->commit_queue, struct journal_entry, fifo);
 		bool first_entry = true;
 		stailq_foreach_entry_safe(entry, tmp, &writer->commit_queue, fifo) {
-			entry = stailq_shift_entry(&writer->commit_queue, struct journal_entry, fifo);
+			entry = stailq_first_entry(&writer->commit_queue, struct journal_entry, fifo);
 			int cmp = vclock_compare(&entry->vclock, &write_vclock);
 			if (cmp == VCLOCK_ORDER_UNDEFINED || cmp > 0) {
 				if (first_entry)
@@ -1095,6 +1096,7 @@ wal_commit_f(va_list ap)
 				break;
 			}
 			first_entry = false;
+			stailq_shift(&writer->commit_queue);
 			cmsg_init(&entry->msg, tx_commit_route);
 			cpipe_push(&writer->tx_prio_pipe, &entry->msg);
 		}
