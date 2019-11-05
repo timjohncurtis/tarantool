@@ -1555,10 +1555,12 @@ wal_relay_reader_f(va_list ap)
 		}
 		/* vclock is followed while decoding, zeroing it. */
 		vclock_create(&vclock);
+		vclock_create(&wal_vclock);
 		if (xrow_decode_applier_state(&xrow, &vclock,
 					      &wal_vclock) < 0)
 			break;
 		mclock_attach(&writer->mclock, status_msg.replica->id, &wal_vclock);
+		fiber_cond_signal(&writer->commit_cond);
 
 		if (status_msg.base.route != NULL)
 			continue;
