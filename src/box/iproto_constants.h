@@ -98,6 +98,8 @@ enum iproto_key {
 	IPROTO_BALLOT = 0x29,
 	IPROTO_TUPLE_META = 0x2a,
 	IPROTO_OPTIONS = 0x2b,
+
+	/* Replication key. */
 	IPROTO_WAL_VCLOCK = 0x2c,
 
 	/* Leave a gap between request keys and response keys */
