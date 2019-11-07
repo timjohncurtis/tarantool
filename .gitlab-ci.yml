@@ -4,6 +4,9 @@ stages:
 variables:
   GITLAB_MAKE: "make -f .gitlab.mk"
 
+before_script:
+  - git submodule foreach git clean -xfd
+
 # Jobs templates
 
 .release_only_template: &release_only_definition
