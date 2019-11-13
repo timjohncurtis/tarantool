@@ -125,7 +125,6 @@ add_library(box STATIC
     authentication.cc
     replication.cc
     recovery.cc
-    xstream.cc
     applier.cc
     relay.cc
     journal.c
