@@ -58,6 +58,10 @@ enum {
 	RTREE_BRANCH_DATA_SIZE = offsetof(struct rtree_page_branch, rect)
 };
 
+/* If during rtree_insert operation we have faced an error (oom most likely)
+ * we set rtree_err and return */
+bool rtree_err = false;
+
 struct rtree_page {
 	/* number of branches at page */
 	unsigned n;
@@ -548,6 +552,10 @@ rtree_split_page(struct rtree *tree, struct rtree_page *page,
 	unsigned k1 = tree->page_min_fill + k;
 	unsigned k2 = n - k1;
 	struct rtree_page *new_page = rtree_page_alloc(tree);
+	if (!new_page) {
+		rtree_err = true;
+		return NULL;
+	}
 	tree->n_pages++;
 	char taken[RTREE_MAXIMUM_BRANCHES_IN_PAGE];
 	memset(taken, 0, sizeof(taken));
@@ -982,7 +990,7 @@ rtree_destroy(struct rtree *tree)
 }
 
 void
-rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj)
+rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj, int *err)
 {
 	if (tree->root == NULL) {
 		tree->root = rtree_page_alloc(tree);
@@ -1000,6 +1008,9 @@ rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj)
 			tree->root = new_root;
 			tree->height++;
 			tree->n_pages++;
+		} if (rtree_err) {
+			*err = 1;
+			return;
 		}
 	}
 	tree->version++;

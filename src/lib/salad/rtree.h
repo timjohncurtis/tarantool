@@ -271,9 +271,10 @@ rtree_search(const struct rtree *tree, const struct rtree_rect *rect,
  * @param tree - pointer to a tree
  * @param rect - rectangle to insert
  * @param obj - record to insert
+ * @param err - set in case of error during insertion
  */
 void
-rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj);
+rtree_insert(struct rtree *tree, struct rtree_rect *rect, record_t obj, int *err);
 
 /**
  * @brief Remove the record from a tree

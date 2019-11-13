@@ -36,7 +36,7 @@ simple_check()
 	struct rtree_iterator iterator;
 	rtree_iterator_init(&iterator);
 	const size_t rounds = 2000;
-
+	int err = 0;
 	header();
 
 	struct rtree tree;
@@ -53,7 +53,9 @@ simple_check()
 		if (rtree_search(&tree, &rect, SOP_EQUALS, &iterator)) {
 			fail("element already in tree (1)", "true");
 		}
-		rtree_insert(&tree, &rect, rec);
+		rtree_insert(&tree, &rect, rec, &err);
+		if (err == 1)
+			printf("Tree is out of memory\n");
 	}
 	if (rtree_number_of_records(&tree) != rounds) {
 		fail("Tree count mismatch (1)", "true");
@@ -92,7 +94,10 @@ simple_check()
 		if (rtree_search(&tree, &rect, SOP_EQUALS, &iterator)) {
 			fail("element already in tree (2)", "true");
 		}
-		rtree_insert(&tree, &rect, rec);
+		err = 0;
+		rtree_insert(&tree, &rect, rec, &err);
+		if (err == 1)
+			printf("Tree is out of memory\n");
 	}
 	if (rtree_number_of_records(&tree) != rounds) {
 		fail("Tree count mismatch (2)", "true");
@@ -132,7 +137,10 @@ simple_check()
 		if (rtree_search(&tree, &rect, SOP_BELONGS, &iterator)) {
 			fail("element already in tree (3)", "true");
 		}
-		rtree_insert(&tree, &rect, rec);
+		err = 0;
+		rtree_insert(&tree, &rect, rec, &err);
+		if (err == 1)
+			printf("Tree is out of memory\n");
 	}
 	if (rtree_number_of_records(&tree) != rounds) {
 		fail("Tree count mismatch (3)", "true");
@@ -172,7 +180,10 @@ simple_check()
 		if (rtree_search(&tree, &rect, SOP_CONTAINS, &iterator)) {
 			fail("element already in tree (4)", "true");
 		}
-		rtree_insert(&tree, &rect, rec);
+		err = 0;
+		rtree_insert(&tree, &rect, rec, &err);
+		if (err == 1)
+			printf("Tree is out of memory\n");
 	}
 	if (rtree_number_of_records(&tree) != rounds) {
 		fail("Tree count mismatch (4)", "true");
@@ -213,9 +224,12 @@ simple_check()
 static void
 rtree_test_build(struct rtree *tree, struct rtree_rect *arr, int count)
 {
+	int err = 0;
 	for (ssize_t i = 0; i < count; i++) {
 		record_t rec = (record_t)(i + 1);
-		rtree_insert(tree, &arr[i], rec);
+		rtree_insert(tree, &arr[i], rec, &err);
+		if (err == 1)
+			printf("Tree is out of memory\n");
 	}
 }
 

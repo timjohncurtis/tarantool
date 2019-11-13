@@ -490,6 +490,7 @@ rand_test()
 	CBoxSet<DIMENSION> set;
 
 	struct rtree tree;
+	int err = 0;
 	rtree_init(&tree, DIMENSION, extent_size,
 		   extent_alloc, extent_free, &page_count,
 		   RTREE_EUCLID);
@@ -512,7 +513,9 @@ rand_test()
 			size_t id = set.AddBox(box);
 			struct rtree_rect rt;
 			box.FillRTreeRect(&rt);
-			rtree_insert(&tree, &rt, (void *)(id + 1));
+			rtree_insert(&tree, &rt, (void *)(id + 1), &err);
+			if (err == 1)
+				printf("Tree is out of memory\n");
 		} else {
 			size_t id = set.RandUsedID();
 			struct rtree_rect rt;

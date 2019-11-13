@@ -6,7 +6,7 @@ local socket = require('socket')
 local fio = require('fio')
 local uuid = require('uuid')
 local msgpack = require('msgpack')
-test:plan(104)
+test:plan(106)
 
 --------------------------------------------------------------------------------
 -- Invalid values
@@ -592,6 +592,34 @@ box.cfg{read_only=true}
 ]]
 test:is(run_script(code), PANIC, "panic on bootstrapping a read-only instance as master")
 
+--
+-- gh-4619-RTREE-doesn't-handle-OOM-properly
+--
+code1 = string.format([[
+box.cfg{memtx_memory = %u}
+math = require("math")
+rtreespace = box.schema.create_space('rtree', {if_not_exists = true})
+rtreespace:create_index('pk', {if_not_exists = true})
+rtreespace:create_index('target', {
+    type='rtree',
+    dimension = 3,
+    parts={2, 'array'},
+    unique = false,
+    if_not_exists = true,
+})
+
+count = 2e6
+for i=1, count do
+    box.space.rtree:insert{i, {(i + 1) - math.floor((i + 1)/7000)*7000,
+    (i + 2) - math.floor((i + 2)/7000)*7000,
+    (i + 3) - math.floor((i + 3)/7000)*7000}}
+end
+box.snapshot()
+os.exit(0)
+]], 3221225472)
+code2 = "box.cfg{}"
+test:is(run_script(code1), 0, "allocate memory for rtree")
+test:is(run_script(code2), 0, "panic on out of memory")
 
 test:check()
 os.exit(0)

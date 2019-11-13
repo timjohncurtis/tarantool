@@ -34,6 +34,7 @@ iterator_check()
 	header();
 
 	struct rtree tree;
+	int err = 0;
 	rtree_init(&tree, 2, extent_size,
 		   extent_alloc, extent_free, &extent_count,
 		   RTREE_EUCLID);
@@ -51,7 +52,9 @@ iterator_check()
 		coord_t coord = i * 2 * count2; /* note that filled with even numbers */
 		for (size_t j = 0; j < count2; j++) {
 			rtree_set2d(&rect, coord, coord, coord + j, coord + j);
-			rtree_insert(&tree, &rect, record_t(++count));
+			rtree_insert(&tree, &rect, record_t(++count), &err);
+			if (err == 1)
+				printf("Tree is out of memory\n");
 		}
 	}
 	printf("Test tree size: %d\n", (int)rtree_number_of_records(&tree));
@@ -207,7 +210,7 @@ iterator_invalidate_check()
 	const size_t attempt_count = 100;
 
 	struct rtree_rect rect;
-
+	int err = 0;
 	/* invalidation during deletion */
 	srand(0);
 	for (size_t attempt = 0; attempt < attempt_count; attempt++) {
@@ -226,7 +229,9 @@ iterator_invalidate_check()
 
 		for (size_t i = 0; i < test_size; i++) {
 			rtree_set2d(&rect, i, i, i, i);
-			rtree_insert(&tree, &rect, record_t(i+1));
+			rtree_insert(&tree, &rect, record_t(i+1), &err);
+			if (err == 1)
+				printf("Tree is out of memory\n");
 		}
 		rtree_set2d(&rect, 0, 0, test_size, test_size);
 		if (!rtree_search(&tree, &rect, SOP_BELONGS, &iterators[0]) ||
@@ -258,6 +263,7 @@ iterator_invalidate_check()
 
 	/* invalidation during insertion */
 	srand(0);
+	err = 0;
 	for (size_t attempt = 0; attempt < attempt_count; attempt++) {
 		size_t ins_pos = rand() % test_size;
 		size_t ins_cnt = rand() % max_insert_count + 1;
@@ -272,7 +278,10 @@ iterator_invalidate_check()
 
 		for (size_t i = 0; i < test_size; i++) {
 			rtree_set2d(&rect, i, i, i, i);
-			rtree_insert(&tree, &rect, record_t(i+1));
+			rtree_insert(&tree, &rect, record_t(i+1), &err);
+			if(err == 1)
+				printf("Tree is out of memory\n");
+
 		}
 		rtree_set2d(&rect, 0, 0, test_size, test_size);
 		rtree_search(&tree, &rect, SOP_BELONGS, &iterators[0]);
@@ -287,7 +296,10 @@ iterator_invalidate_check()
 		}
 		for (size_t i = ins_pos; i < ins_pos + ins_cnt; i++) {
 			rtree_set2d(&rect, i, i, i, i);
-			rtree_insert(&tree, &rect, record_t(test_size + i - ins_pos + 1));
+			err = 0;
+			rtree_insert(&tree, &rect, record_t(test_size + i - ins_pos + 1), &err);
+			if (err == 1)
+				printf("Tree is out of memory\n");
 		}
 		for (size_t i = 0; i < test_size; i++) {
 			if (rtree_iterator_next(&iterators[i])) {

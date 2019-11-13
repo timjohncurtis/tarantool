@@ -225,12 +225,18 @@ memtx_rtree_index_replace(struct index *base, struct tuple *old_tuple,
 			  struct tuple **result)
 {
 	(void)mode;
+	int err = 0;
 	struct memtx_rtree_index *index = (struct memtx_rtree_index *)base;
 	struct rtree_rect rect;
 	if (new_tuple) {
 		if (extract_rectangle(&rect, new_tuple, base->def) != 0)
 			return -1;
-		rtree_insert(&index->tree, &rect, new_tuple);
+		rtree_insert(&index->tree, &rect, new_tuple, &err);
+		if (err == 1) {
+			diag_set(OutOfMemory, sizeof(struct rtree),
+			 "rtree", "rtree_page");
+			return -1;
+		}
 	}
 	if (old_tuple) {
 		if (extract_rectangle(&rect, old_tuple, base->def) != 0)
