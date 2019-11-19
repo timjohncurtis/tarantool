@@ -1364,7 +1364,7 @@ end
 local read_ops = {'select', 'get', 'min', 'max', 'count', 'random', 'pairs'}
 for _, op in ipairs(read_ops) do
     vinyl_index_mt[op] = base_index_mt[op..'_luac']
-    memtx_index_mt[op] = base_index_mt[op..'_ffi']
+    memtx_index_mt[op] = base_index_mt[op..'_luac']
 end
 -- Lua 5.2 compatibility
 vinyl_index_mt.__pairs = vinyl_index_mt.pairs
