@@ -1697,10 +1697,11 @@ s:close()
 ---
 - 1
 ...
--- Sic: incompatible with Lua Socket
+-- Second close return false and set errno = EBADF
 s:close()
 ---
-- error: 'builtin/socket.lua: attempt to use closed socket'
+- null
+- Bad file descriptor
 ...
 s = socket.tcp()
 ---

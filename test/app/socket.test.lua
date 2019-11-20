@@ -585,7 +585,7 @@ test_run:cmd("push filter 'fd=([0-9]+)' to 'fd=<FD>'")
 s = socket.tcp()
 s
 s:close()
--- Sic: incompatible with Lua Socket
+-- Second close return false and set errno = EBADF
 s:close()
 
 s = socket.tcp()
