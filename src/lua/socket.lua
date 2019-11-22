@@ -61,6 +61,9 @@ ffi.cdef[[
         const void *needle, size_t needlelen);
 ]]
 
+-- luacheck: ignore bit
+-- luacheck: ignore jit
+
 local gc_socket_t = ffi.metatype(ffi.typeof('struct gc_socket'), {
     __gc = function (socket)
         if socket.fd < 0 then return end
@@ -172,7 +175,7 @@ local function get_iflags(table, flags)
     if type(flags) ~= 'table' then
         flags = { flags }
     end
-    for i, f in pairs(flags) do
+    for _, f in pairs(flags) do
         if table[f] == nil then
             return nil
         end
@@ -222,8 +225,8 @@ local function socket_error(self)
 end
 
 -- addrbuf is equivalent to struct sockaddr_storage
-local addrbuf = ffi.new('char[128]') -- enough to fit any address
-local addr = ffi.cast('struct sockaddr *', addrbuf)
+local addrbuf = ffi.new('char[128]') -- enough to fit any addr
+local address = ffi.cast('struct sockaddr *', addrbuf)
 local addr_len = ffi.new('socklen_t[1]')
 local function socket_sysconnect(self, host, port)
     local fd = check_socket(self)
@@ -233,9 +236,9 @@ local function socket_sysconnect(self, host, port)
     port = tostring(port)
 
     addr_len[0] = ffi.sizeof(addrbuf)
-    local res = ffi.C.lbox_socket_local_resolve(host, port, addr, addr_len)
+    local res = ffi.C.lbox_socket_local_resolve(host, port, address, addr_len)
     if res == 0 then
-        res = ffi.C.connect(fd, addr, addr_len[0]);
+        res = ffi.C.connect(fd, address, addr_len[0])
         if res == 0 then
             return true
         end
@@ -385,9 +388,9 @@ local function socket_bind(self, host, port)
     port = tostring(port)
 
     addr_len[0] = ffi.sizeof(addrbuf)
-    local res = ffi.C.lbox_socket_local_resolve(host, port, addr, addr_len)
+    local res = ffi.C.lbox_socket_local_resolve(host, port, address, addr_len)
     if res == 0 then
-        res = ffi.C.bind(fd, addr, addr_len[0]);
+        res = ffi.C.bind(fd, address, addr_len[0])
     end
     if res == 0 then
         return true
@@ -618,16 +621,16 @@ local function socket_accept(self)
 end
 
 local errno_is_transient = {
-    [boxerrno.EAGAIN] = true;
-    [boxerrno.EWOULDBLOCK] = true;
-    [boxerrno.EINTR] = true;
+    [boxerrno.EAGAIN] = true,
+    [boxerrno.EWOULDBLOCK] = true,
+    [boxerrno.EINTR] = true
 }
 
 local errno_is_fatal = {
-    [boxerrno.EBADF] = true;
-    [boxerrno.EINVAL] = true;
-    [boxerrno.EOPNOTSUPP] = true;
-    [boxerrno.ENOTSOCK] = true;
+    [boxerrno.EBADF] = true,
+    [boxerrno.EINVAL] = true,
+    [boxerrno.EOPNOTSUPP] = true,
+    [boxerrno.ENOTSOCK] = true
 }
 
 local function check_limit(self, limit)
@@ -660,7 +663,7 @@ local function check_delimiter(self, limit, eols)
     end
 
     local shortest
-    for i, eol in ipairs(eols) do
+    for _, eol in ipairs(eols) do
         local data = ffi.C.memmem(rbuf.rpos, rbuf:size(), eol, #eol)
         if data ~= nil then
             local len = ffi.cast('char *', data) - rbuf.rpos + #eol
@@ -689,16 +692,19 @@ local function read(self, limit, timeout, check, ...)
         self.rbuf = rbuf
     end
 
-    local len = check(self, limit, ...)
-    if len ~= nil then
-        self._errno = nil
-        local data = ffi.string(rbuf.rpos, len)
-        rbuf.rpos = rbuf.rpos + len
-        return data
+    do
+        local len = check(self, limit, ...)
+        if len ~= nil then
+            self._errno = nil
+            local data = ffi.string(rbuf.rpos, len)
+            rbuf.rpos = rbuf.rpos + len
+            return data
+        end
     end
 
     local deadline = fiber.clock() + timeout
     repeat
+        -- luacheck: ignore data
         assert(rbuf:size() < limit)
         local to_read = math.min(limit - rbuf:size(), buffer.READAHEAD)
         local data = rbuf:reserve(to_read)
@@ -906,10 +912,10 @@ local function socket_sendto(self, host, port, octets, flags)
     octets = tostring(octets)
 
     addr_len[0] = ffi.sizeof(addrbuf)
-    local res = ffi.C.lbox_socket_local_resolve(host, port, addr, addr_len)
+    local res = ffi.C.lbox_socket_local_resolve(host, port, address, addr_len)
     if res == 0 then
         res = ffi.C.sendto(fd, octets, string.len(octets), iflags,
-            addr, addr_len[0])
+            address, addr_len[0])
     end
     if res < 0 then
         self._errno = boxerrno()
@@ -999,8 +1005,8 @@ local function getaddrinfo(host, port, timeout, opts)
 end
 
 -- tcp connector
-local function socket_tcp_connect(s, address, port, timeout)
-    local res = socket_sysconnect(s, address, port)
+local function socket_tcp_connect(s, addr, port, timeout)
+    local res = socket_sysconnect(s, addr, port)
     if res then
         -- Even through the socket is nonblocking, if the server to which we
         -- are connecting is on the same host, the connect is normally
@@ -1039,6 +1045,7 @@ local function tcp_connect(host, port, timeout)
         boxerrno(0)
         return s
     end
+    -- luacheck: ignore timeout
     local timeout = timeout or TIMEOUT_INFINITY
     local stop = fiber.clock() + timeout
     local dns = getaddrinfo(host, port, timeout, { type = 'SOCK_STREAM',
@@ -1047,7 +1054,7 @@ local function tcp_connect(host, port, timeout)
         boxerrno(boxerrno.EINVAL)
         return nil
     end
-    for i, remote in pairs(dns) do
+    for _, remote in pairs(dns) do
         timeout = stop - fiber.clock()
         if timeout <= 0 then
             boxerrno(boxerrno.ETIMEDOUT)
@@ -1221,33 +1228,33 @@ end
 
 socket_mt   = {
     __index = {
-        close = socket_close;
-        errno = socket_errno;
-        error = socket_error;
-        sysconnect = socket_sysconnect;
-        syswrite = socket_syswrite;
-        sysread = socket_sysread;
-        nonblock = socket_nonblock;
-        readable = socket_readable;
-        writable = socket_writable;
-        wait = socket_wait;
-        listen = socket_listen;
-        bind = socket_bind;
-        shutdown = socket_shutdown;
-        setsockopt = socket_setsockopt;
-        getsockopt = socket_getsockopt;
-        linger = socket_linger;
-        accept = socket_accept;
-        read = socket_read;
-        write = socket_write;
-        send = socket_send;
-        recv = socket_recv;
-        recvfrom = socket_recvfrom;
-        sendto = socket_sendto;
-        name = socket_name;
-        peer = socket_peer;
-        fd = socket_fd;
-    };
+        close = socket_close,
+        errno = socket_errno,
+        error = socket_error,
+        sysconnect = socket_sysconnect,
+        syswrite = socket_syswrite,
+        sysread = socket_sysread,
+        nonblock = socket_nonblock,
+        readable = socket_readable,
+        writable = socket_writable,
+        wait = socket_wait,
+        listen = socket_listen,
+        bind = socket_bind,
+        shutdown = socket_shutdown,
+        setsockopt = socket_setsockopt,
+        getsockopt = socket_getsockopt,
+        linger = socket_linger,
+        accept = socket_accept,
+        read = socket_read,
+        write = socket_write,
+        send = socket_send,
+        recv = socket_recv,
+        recvfrom = socket_recvfrom,
+        sendto = socket_sendto,
+        name = socket_name,
+        peer = socket_peer,
+        fd = socket_fd
+    },
     __tostring  = function(self)
         local fd = check_socket(self)
 
@@ -1311,7 +1318,7 @@ local function lsocket_tcp_getpeername(self)
     return peer.host, tostring(peer.port), peer.family:match("AF_(.*)"):lower()
 end
 
-local function lsocket_tcp_settimeout(self, value, mode)
+local function lsocket_tcp_settimeout(self, value, mode) -- luacheck: no unused args
     check_socket(self)
     self.timeout = value
     -- mode is effectively ignored
@@ -1339,8 +1346,8 @@ local function lsocket_tcp_setoption(self, option, value)
     return 1
 end
 
-local function lsocket_tcp_bind(self, address, port)
-    if not socket_bind(self, address, port) then
+local function lsocket_tcp_bind(self, addr, port)
+    if not socket_bind(self, addr, port) then
         return nil, socket_error(self)
     end
     return 1
@@ -1376,18 +1383,18 @@ end
 
 lsocket_tcp_mt = {
     __index = {
-        close = lsocket_tcp_close;
-        getsockname = lsocket_tcp_getsockname;
-        getpeername = lsocket_tcp_getpeername;
-        settimeout = lsocket_tcp_settimeout;
-        setoption = lsocket_tcp_setoption;
-        bind = lsocket_tcp_bind;
-        listen = lsocket_tcp_listen;
-        connect = lsocket_tcp_connect;
-    };
-    __tostring = lsocket_tcp_tostring;
-    __serialize = lsocket_tcp_tostring;
-};
+        close = lsocket_tcp_close,
+        getsockname = lsocket_tcp_getsockname,
+        getpeername = lsocket_tcp_getpeername,
+        settimeout = lsocket_tcp_settimeout,
+        setoption = lsocket_tcp_setoption,
+        bind = lsocket_tcp_bind,
+        listen = lsocket_tcp_listen,
+        connect = lsocket_tcp_connect
+    },
+    __tostring = lsocket_tcp_tostring,
+    __serialize = lsocket_tcp_tostring
+}
 
 --
 -- TCP Server Socket
@@ -1417,16 +1424,16 @@ end
 
 lsocket_tcp_server_mt = {
     __index = {
-        close = lsocket_tcp_close;
-        getsockname = lsocket_tcp_getsockname;
-        getpeername = lsocket_tcp_getpeername;
-        settimeout = lsocket_tcp_settimeout;
-        setoption = lsocket_tcp_setoption;
-        accept = lsocket_tcp_accept;
-    };
-    __tostring = lsocket_tcp_server_tostring;
-    __serialize = lsocket_tcp_server_tostring;
-};
+        close = lsocket_tcp_close,
+        getsockname = lsocket_tcp_getsockname,
+        getpeername = lsocket_tcp_getpeername,
+        settimeout = lsocket_tcp_settimeout,
+        setoption = lsocket_tcp_setoption,
+        accept = lsocket_tcp_accept
+    },
+    __tostring = lsocket_tcp_server_tostring,
+    __serialize = lsocket_tcp_server_tostring
+}
 
 --
 -- TCP Client Socket
@@ -1467,7 +1474,7 @@ local function lsocket_tcp_receive(self, pattern, prefix)
         local result = { prefix }
         local deadline = fiber.clock() + (self.timeout or TIMEOUT_INFINITY)
         repeat
-            local data = read(self, LIMIT_INFINITY, timeout, check_infinity)
+            data = read(self, LIMIT_INFINITY, timeout, check_infinity)
             if data == nil then
                 if not errno_is_transient[self._errno] then
                     return nil, socket_error(self)
@@ -1507,18 +1514,18 @@ end
 
 lsocket_tcp_client_mt = {
     __index = {
-        close = lsocket_tcp_close;
-        getsockname = lsocket_tcp_getsockname;
-        getpeername = lsocket_tcp_getpeername;
-        settimeout = lsocket_tcp_settimeout;
-        setoption = lsocket_tcp_setoption;
-        receive = lsocket_tcp_receive;
-        send = lsocket_tcp_send;
-        shutdown = lsocket_tcp_shutdown;
-    };
-    __tostring = lsocket_tcp_client_tostring;
-    __serialize = lsocket_tcp_client_tostring;
-};
+        close = lsocket_tcp_close,
+        getsockname = lsocket_tcp_getsockname,
+        getpeername = lsocket_tcp_getpeername,
+        settimeout = lsocket_tcp_settimeout,
+        setoption = lsocket_tcp_setoption,
+        receive = lsocket_tcp_receive,
+        send = lsocket_tcp_send,
+        shutdown = lsocket_tcp_shutdown
+    },
+    __tostring = lsocket_tcp_client_tostring,
+    __serialize = lsocket_tcp_client_tostring
+}
 
 --
 -- Unconnected tcp socket (tcp{master}) should not have receive() and
@@ -1528,8 +1535,8 @@ lsocket_tcp_client_mt = {
 -- receive()/send() on unconnected sockets.
 -- [1]: http://w3.impa.br/~diego/software/luasocket/tcp.html
 --
-lsocket_tcp_mt.__index.receive = lsocket_tcp_receive;
-lsocket_tcp_mt.__index.send = lsocket_tcp_send;
+lsocket_tcp_mt.__index.receive = lsocket_tcp_receive
+lsocket_tcp_mt.__index.send = lsocket_tcp_send
 
 --
 -- TCP Constructor and Shortcuts
@@ -1538,7 +1545,7 @@ lsocket_tcp_mt.__index.send = lsocket_tcp_send;
 local function lsocket_tcp()
     local s = socket_new('AF_INET', 'SOCK_STREAM', 'tcp')
     if not s then
-        return nil, socket_error(self)
+        return nil, boxerrno.strerror()
     end
     return setmetatable(s, lsocket_tcp_mt)
 end
@@ -1559,7 +1566,11 @@ local function lsocket_bind(host, port, backlog)
     if host == nil or port == nil then
         error("Usage: luasocket.bind(host, port [, backlog])")
     end
-    local function prepare(s) return backlog end
+
+    local function prepare()
+        return backlog
+    end
+
     local s = tcp_server_bind(host, port, prepare)
     if not s then
         return nil, boxerrno.strerror()
@@ -1576,12 +1587,15 @@ return setmetatable({
     tcp_connect = tcp_connect,
     tcp_server = tcp_server,
     iowait = internal.iowait,
-    internal = internal,
+    internal = internal
 }, {
-    __call = function(self, ...) return socket_new(...) end;
+     -- luacheck: no unused args
+    __call = function(self, ...)
+            return socket_new(...)
+        end,
     __index = {
-        tcp = lsocket_tcp;
-        connect = lsocket_connect;
-        bind = lsocket_bind;
+        tcp = lsocket_tcp,
+        connect = lsocket_connect,
+        bind = lsocket_bind
     }
 })
