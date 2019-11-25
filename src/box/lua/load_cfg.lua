@@ -162,7 +162,19 @@ local function normalize_uri_list(port_list)
     else
         table.insert(result, normalize_uri(port_list))
     end
-    return result
+    local result_mm = setmetatable({},{
+    __newindex = function(result, index)
+                error('Attempt to modify a read-only table')
+    end,
+    __index = function (self, k) return result[k] end,
+    __serialize = function() return result end,
+    __pairs = function(self)
+        local function iter(result, k)
+            return next(result, k)
+        end
+        return iter, result, nil
+    end})
+    return result_mm
 end
 
 -- options that require special handling
@@ -188,7 +200,19 @@ local function purge_password_from_uris(uri)
         for k, v in pairs(uri) do
             new_table[k] = purge_password_from_uri(v)
         end
-        return new_table
+    local new_table_mm = setmetatable({}, {
+        __newindex = function(table, index)
+                error('Attempt to modify a read-only table')
+        end,
+        __index = function (self, k) return new_table[k] end,
+        __serialize = function() return new_table end,
+        __pairs = function(self)
+            local function iter(new_table, k)
+                return next(new_table, k)
+            end
+            return iter, new_table, nil
+        end})
+        return new_table_mm
     end
     return purge_password_from_uri(uri)
 end
@@ -419,7 +443,8 @@ local function prepare_cfg(cfg, default_cfg, template_cfg, modify_cfg, prefix)
                     template_cfg[k])
             end
         end
-        if modify_cfg ~= nil and type(modify_cfg[k]) == 'function' then
+        log.info("modify_cfg %s __ %s", modify_cfg, type (modify_cfg))
+        if modify_cfg ~= nil and (type(modify_cfg[k]) == 'table') then
             v = modify_cfg[k](v)
         end
         new_cfg[k] = v
@@ -533,12 +558,24 @@ local function load_cfg(cfg)
     end
     setmetatable(box, nil)
     box_configured = nil
-    box.cfg = setmetatable(cfg,
+
+    local actual = cfg
+    box.cfg = setmetatable({},
         {
             __newindex = function(table, index)
                 error('Attempt to modify a read-only table')
             end,
             __call = locked(reload_cfg),
+            __index = function (self, k)
+                return actual[k]
+            end,
+            __serialize = function() return actual end,
+            __pairs = function(self)
+                local function iter(actual, k)
+                    return next(actual, k)
+                end
+                return iter, actual, nil
+            end
         })
     private.cfg_load()
     for key, fun in pairs(dynamic_cfg) do

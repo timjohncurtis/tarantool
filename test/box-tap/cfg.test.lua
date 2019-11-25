@@ -6,7 +6,7 @@ local socket = require('socket')
 local fio = require('fio')
 local uuid = require('uuid')
 local msgpack = require('msgpack')
-test:plan(104)
+test:plan(108)
 
 --------------------------------------------------------------------------------
 -- Invalid values
@@ -592,6 +592,33 @@ box.cfg{read_only=true}
 ]]
 test:is(run_script(code), PANIC, "panic on bootstrapping a read-only instance as master")
 
+--
+-- gf-2867 raise on raw modifications of box.cfg values
+--
+code = [[
+box.cfg{}
+box.cfg["read_only"] = true
+]]
+test:is(run_script(code), PANIC, "attempt to modify a read-only table")
+
+code = [[
+box.cfg{}
+box.cfg.new_filed = 'new_filed'
+]]
+test:is(run_script(code), PANIC, "attempt to modify a read-only table")
+
+-- relplication is the table itself, we should test it seperately
+code = [[
+box.cfg{ replication_connect_quorum=0, replication={"127.0.0.1:3301","127.0.0.2:3301"}
+box.cfg.replication[1] = 'replication'
+]]
+test:is(run_script(code), PANIC, "attempt to modify a read-only table")
+
+code = [[
+box.cfg{}
+box.cfg.replication[1] = 'replication'
+]]
+test:is(run_script(code), PANIC, "attempt to modify a read-only table")
 
 test:check()
 os.exit(0)
