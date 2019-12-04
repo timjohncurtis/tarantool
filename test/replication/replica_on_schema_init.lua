@@ -20,6 +20,7 @@ end)
 box.cfg({
     listen              = os.getenv("LISTEN"),
     replication         = os.getenv("MASTER"),
+    replication_timeout = 0.1,
 })
 
 require('console').listen(os.getenv('ADMIN'))
