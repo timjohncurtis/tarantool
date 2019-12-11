@@ -1049,6 +1049,7 @@ cord_create(struct cord *cord, const char *name)
 {
 	cord() = cord;
 	slab_cache_set_thread(&cord()->slabc);
+	stailq_create(&cord()->region_cache);
 
 	cord->id = pthread_self();
 	cord->on_exit = NULL;
