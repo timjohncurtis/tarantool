@@ -127,16 +127,27 @@ test_asan_debian: deps_debian deps_buster_clang_8 test_asan_debian_no_deps
 # OSX #
 #######
 
+OSX_PKGS=openssl readline curl icu4c libiconv zlib autoconf automake libtool cmake python2
+
 deps_osx:
-	brew update
-	brew install openssl readline curl icu4c libiconv zlib autoconf automake libtool --force
-	python2 -V || brew install python2 --force
-	curl --silent --show-error --retry 5 https://bootstrap.pypa.io/get-pip.py >get-pip.py
-	python get-pip.py --user
-	pip install --user --force-reinstall -r test-run/requirements.txt
+	# install brew using command from Homebrew repository instructions:
+	#   https://github.com/Homebrew/install
+	# NOTE: 'echo' command below is required since brew installation
+	# script obliges the one to enter a newline for confirming the
+	# installation via Ruby script.
+	brew update || echo | /usr/bin/ruby -e \
+		"$$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install)"
+	# try to install the packages either upgrade it to avoid of fails
+	# if the package already exists with the previous version
+	brew install --force ${OSX_PKGS} || brew upgrade ${OSX_PKGS}
+	curl --silent --show-error --retry 5 \
+		https://bootstrap.pypa.io/get-pip.py >get-pip.py
+	python get-pip.py
+	pip install --force-reinstall -r test-run/requirements.txt
 
 build_osx:
-	cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_WERROR=ON ${CMAKE_EXTRA_PARAMS}
+	cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+		-DENABLE_WERROR=ON ${CMAKE_EXTRA_PARAMS}
 	make -j
 
 test_osx_no_deps: build_osx
@@ -153,8 +164,9 @@ test_osx_no_deps: build_osx
 		ulimit -n ${MAX_FILES} || : ; \
 		ulimit -n ; \
 		cd test && ./test-run.py --force $(TEST_RUN_EXTRA_PARAMS) \
-			app/ app-tap/ box/ box-py/ box-tap/ engine/ engine_long/ long_run-py/ luajit-tap/ \
-			replication-py/ small/ sql/ sql-tap/ swim/ unit/ vinyl/ wal_off/ xlog/ xlog-py/
+			app/ app-tap/ box/ box-py/ box-tap/ engine/ engine_long/ \
+			long_run-py/ luajit-tap/ replication-py/ small/ sql/ \
+			sql-tap/ swim/ unit/ vinyl/ wal_off/ xlog/ xlog-py/
 
 test_osx: deps_osx test_osx_no_deps
 
