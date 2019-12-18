@@ -152,8 +152,6 @@ struct autoinc_id_entry {
 };
 
 struct txn {
-	/** A stailq_entry to hold a txn in a cache. */
-	struct stailq_entry in_txn_cache;
 	/**
 	 * A memory region to put all transaction relative data in.
 	 * Detaching transaction data from a fiber temporary storage
@@ -161,7 +159,7 @@ struct txn {
 	 * transactions simultaneously. Also interactive and autonomous
 	 * transactions will require this.
 	 */
-	struct region region;
+	struct region *region;
 	/**
 	 * A sequentially growing transaction id, assigned when
 	 * a transaction is initiated. Used to identify
