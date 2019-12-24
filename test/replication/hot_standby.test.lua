@@ -118,7 +118,7 @@ _insert(11, 20)
 _select(11, 20)
 
 test_run:cmd("switch replica")
-_wait_lsn(10)
+test_run:wait_lsn('replica', 'hot_standby')
 _select(11, 20)
 
 test_run:cmd("stop server hot_standby")
