@@ -203,6 +203,8 @@ enum iproto_type {
 	IPROTO_EXECUTE = 11,
 	/** No operation. Treated as DML, used to bump LSN. */
 	IPROTO_NOP = 12,
+	/** Wal ack row. */
+	IPROTO_WAL_ACK = 13,
 	/** The maximum typecode used for box.stat() */
 	IPROTO_TYPE_STAT_MAX,
 

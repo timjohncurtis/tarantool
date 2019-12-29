@@ -181,6 +181,9 @@ struct wal_writer
 	struct xrow_buf xrow_buf;
 	/** xrow buffer condition signaled when a buffer write was done. */
 	struct fiber_cond xrow_buf_cond;
+	/**
+	 * A memory pool used to allocate wal status messages. */
+	struct mempool status_msg_pool;
 };
 
 struct wal_msg {
@@ -220,6 +223,34 @@ wal_write_to_disk(struct cmsg *msg);
 
 static void
 tx_schedule_commit(struct cmsg *msg);
+
+/* Message used in order to deliver wal written vclock to TX. */
+struct wal_status_msg {
+	struct cmsg base;
+	struct vclock vclock;
+};
+
+static void
+tx_update_wal_ack(struct cmsg *base)
+{
+	struct wal_status_msg *msg =
+		container_of(base, struct wal_status_msg, base);
+	trigger_run(&replicaset.on_wal_ack, &msg->vclock);
+}
+
+static void
+wal_update_wal_status_done(struct cmsg *base)
+{
+	struct wal_status_msg *msg =
+		container_of(base, struct wal_status_msg, base);
+	struct wal_writer *writer = &wal_writer_singleton;
+	mempool_free(&writer->status_msg_pool, msg);
+}
+
+static struct cmsg_hop wal_ack_route[] = {
+	{tx_update_wal_ack, &wal_writer_singleton.wal_pipe},
+	{wal_update_wal_status_done, NULL},
+};
 
 static struct cmsg_hop wal_request_route[] = {
 	{wal_write_to_disk, NULL},
@@ -1014,6 +1045,8 @@ wal_write_to_disk(struct cmsg *msg)
 		/* We're rolling back a failed write. */
 		stailq_concat(&wal_msg->rollback, &wal_msg->commit);
 		vclock_copy(&wal_msg->vclock, &writer->vclock);
+		cmsg_init(&wal_msg->base, wal_response_route);
+		cpipe_push(&writer->tx_prio_pipe, &wal_msg->base);
 		return;
 	}
 
@@ -1137,6 +1170,16 @@ wal_write_to_disk(struct cmsg *msg)
 	cpipe_push(&writer->tx_prio_pipe, &wal_msg->base);
 	fiber_gc();
 	wal_notify_watchers(writer, WAL_EVENT_WRITE);
+	/* Transaction were written out so emit an ack request. */
+	struct wal_status_msg *status_msg = (struct wal_status_msg *)
+		mempool_alloc(&writer->status_msg_pool);
+	if (status_msg == NULL) {
+		say_error("Could not allocate wal ack message");
+		return;
+	}
+	vclock_copy(&status_msg->vclock, &writer->vclock);
+	cmsg_init(&status_msg->base, wal_ack_route);
+	cpipe_push(&writer->tx_prio_pipe, &status_msg->base);
 }
 
 
@@ -1177,6 +1220,10 @@ wal_writer_f(va_list ap)
 	 */
 	xrow_buf_create(&writer->xrow_buf);
 	fiber_cond_create(&writer->xrow_buf_cond);
+
+	/* Initialize memory pool for status messages. */
+	mempool_create(&writer->status_msg_pool, &cord()->slabc,
+		       sizeof(struct wal_status_msg));
 
 	/** Initialize eio in this thread */
 	coio_enable();
@@ -1302,6 +1349,7 @@ wal_write_in_wal_mode_none(struct journal *journal,
 	vclock_copy(&replicaset.wal_vclock, &writer->vclock);
 	journal_entry_complete(entry);
 	trigger_run(&replicaset.on_write, &writer->vclock);
+	trigger_run(&replicaset.on_wal_ack, &writer->vclock);
 	return 0;
 }
 

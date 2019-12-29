@@ -552,6 +552,19 @@ int
 xrow_decode_sql(const struct xrow_header *row, struct sql_request *request);
 
 /**
+ * Encode wal entry with given vclock and store encoded data to region.
+ */
+int
+xrow_encode_wal_ack(struct xrow_header *row, const struct vclock *vclock,
+		    struct region *region);
+
+/**
+ * Extract encoded wal ack vclock from given xrow.
+ */
+int
+xrow_decode_wal_ack(const struct xrow_header *row, struct vclock *vclock);
+
+/**
  * Write the SQL header.
  * @param buf Out buffer.
  * @param svp Savepoint of the header beginning.

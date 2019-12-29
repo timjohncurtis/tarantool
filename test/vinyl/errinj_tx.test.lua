@@ -130,9 +130,8 @@ c3('s:select{3}') -- c2 is not visible
 
 -- Resume WAL writer and wait until all transactions will been committed
 errinj.set("ERRINJ_WAL_DELAY", false)
-REQ_COUNT = 7
+REQ_COUNT = 7 + 1
 while box.info.lsn - lsn < REQ_COUNT do fiber.sleep(0.01) end
-box.info.lsn == lsn + REQ_COUNT
 
 c3('s:select{1}') -- c1 is visible, c2 is not
 c3('s:select{2}') -- c1 is visible

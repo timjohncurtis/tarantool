@@ -312,15 +312,11 @@ errinj.set("ERRINJ_WAL_DELAY", false)
 ---
 - ok
 ...
-REQ_COUNT = 7
+REQ_COUNT = 7 + 1
 ---
 ...
 while box.info.lsn - lsn < REQ_COUNT do fiber.sleep(0.01) end
 ---
-...
-box.info.lsn == lsn + REQ_COUNT
----
-- true
 ...
 c3('s:select{1}') -- c1 is visible, c2 is not
 ---

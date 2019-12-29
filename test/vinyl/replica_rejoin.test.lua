@@ -19,6 +19,7 @@ test_run:cmd("create server replica with rpl_master=default, script='vinyl/repli
 test_run:cmd("start server replica")
 files = test_run:eval("replica", "fio = require('fio') return fio.glob(fio.pathjoin(box.cfg.vinyl_dir, box.space.test.id, 0, '*'))")[1]
 _ = box.space.mem:replace{'files', files}
+
 test_run:cmd("stop server replica")
 
 -- Invoke garbage collector on the master.

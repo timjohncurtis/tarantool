@@ -340,6 +340,17 @@ apply_wal_row(struct xstream *stream, struct xrow_header *row)
 {
 	struct wal_stream *wal_stream =
 		container_of(stream, struct wal_stream, base);
+
+	/* Wal ACK request should be processed through the txn engine. */
+	if (row->type == IPROTO_WAL_ACK) {
+		assert(row->lsn == row->tsn);
+		assert(row->is_commit);
+		if (txn_process_ack(row) != 0)
+			return -1;
+		return 0;
+	}
+
+
 	if (wal_stream->txn == NULL) {
 		wal_stream->txn = txn_begin();
 		if (wal_stream->txn == NULL)
@@ -360,7 +371,7 @@ apply_wal_row(struct xstream *stream, struct xrow_header *row)
 			rc = txn_commit_stmt(txn, &request);
 	}
 	if (row->is_commit) {
-		if (txn_commit(wal_stream->txn) != 0) {
+		if (txn_write(wal_stream->txn) != 0) {
 			wal_stream->txn = NULL;
 			return -1;
 		}
@@ -1540,13 +1551,27 @@ box_process_join(struct ev_io *io, struct xrow_header *header)
 
 	ERROR_INJECT_YIELD(ERRINJ_REPLICA_JOIN_DELAY);
 
-	/* Remember master's vclock after the last request */
+	/*
+	 * Remember master's vclock after the last request.
+	 * This vclock includes an ack request for the replica
+	 * registration info as well as some committed and non
+	 * yet-committed transactions.
+	 */
 	struct vclock stop_vclock;
 	vclock_copy(&stop_vclock, &replicaset.wal_vclock);
-
-	/* Send end of initial stage data marker */
+	struct vclock commit_vclock;
+	vclock_copy(&commit_vclock, &replicaset.commit_vclock);
+	/*
+	 * Send end of initial stage data marker.
+	 * The marker denotes the last transaction that replica
+	 * should apply to be sync with the master committed
+	 * state. In the opposite case any subsequent transaction
+	 * could not be committed because there is no corresponding
+	 * ack request and then could not sync engine in order
+	 * to make a snapshot.
+	 */
 	struct xrow_header row;
-	xrow_encode_vclock_xc(&row, &stop_vclock);
+	xrow_encode_vclock_xc(&row, &commit_vclock);
 	row.sync = header->sync;
 	if (coio_write_xrow(io, &row) < 0)
 		diag_raise();
@@ -1558,8 +1583,13 @@ box_process_join(struct ev_io *io, struct xrow_header *header)
 	relay_final_join(io->fd, header->sync, &start_vclock, &stop_vclock);
 	say_info("final data sent.");
 
-	/* Send end of WAL stream marker */
-	xrow_encode_vclock_xc(&row, &replicaset.wal_vclock);
+	/*
+	 * As replica skips transactions after the commit vclock
+	 * then all such transaction should be resent while
+	 * subscribe phase. Inform the replica about the vclock
+	 * to start subscription.
+	 */
+	xrow_encode_vclock_xc(&row, &commit_vclock);
 	row.sync = header->sync;
 	if (coio_write_xrow(io, &row) < 0)
 		diag_raise();

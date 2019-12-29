@@ -316,7 +316,8 @@ static ssize_t
 relay_subscribe_filter(struct wal_relay *wal_relay, struct xrow_header **row)
 {
 	if ((*row)->type != IPROTO_OK) {
-		assert(iproto_type_is_dml((*row)->type));
+		assert(iproto_type_is_dml((*row)->type) ||
+		       (*row)->type == IPROTO_WAL_ACK);
 		/*
 		 * Because of asynchronous replication both master
 		 * and replica may have different transaction
