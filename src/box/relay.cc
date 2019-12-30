@@ -367,7 +367,8 @@ tx_status_update(struct cmsg *msg)
 {
 	struct relay_status_msg *status = (struct relay_status_msg *)msg;
 	vclock_copy(&status->relay->tx.vclock, &status->vclock);
-	gc_consumer_advance(status->relay->replica->gc, &status->vclock);
+	if (!status->relay->replica->anon)
+		gc_consumer_advance(status->relay->replica->gc, &status->vclock);
 	static const struct cmsg_hop route[] = {
 		{relay_status_update, NULL}
 	};
