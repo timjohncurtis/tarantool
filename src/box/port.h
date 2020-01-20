@@ -86,6 +86,12 @@ struct port_msgpack {
 	const struct port_vtab *vtab;
 	const char *data;
 	uint32_t data_sz;
+	/**
+	 * Buffer for dump_*() functions. In particular, it is
+	 * used by the plain dumper to save a result string and
+	 * free it when the port is destroyed.
+	 */
+	char *buffer;
 };
 
 static_assert(sizeof(struct port_msgpack) <= sizeof(struct port),
@@ -94,6 +100,10 @@ static_assert(sizeof(struct port_msgpack) <= sizeof(struct port),
 /** Initialize a port to dump raw data. */
 void
 port_msgpack_create(struct port *port, const char *data, uint32_t data_sz);
+
+/** Destroy a MessagePack port. */
+void
+port_msgpack_destroy(struct port *base);
 
 /** Port for storing the result of a Lua CALL/EVAL. */
 struct port_lua {

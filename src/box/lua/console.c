@@ -37,6 +37,7 @@
 #include "lua/fiber.h"
 #include "fiber.h"
 #include "coio.h"
+#include "lua/msgpack.h"
 #include "lua-yaml/lyaml.h"
 #include <lua.h>
 #include <lauxlib.h>
@@ -408,6 +409,86 @@ port_lua_dump_plain(struct port *port, uint32_t *size)
 	const char *result = lua_tolstring(L, -1, &len);
 	*size = (uint32_t) len;
 	return result;
+}
+
+/**
+ * A helper for port_msgpack_dump_plain() to safely work with Lua,
+ * being called via pcall().
+ */
+static int
+lua_port_msgpack_dump_plain(struct lua_State *L)
+{
+	const char *data = lua_touserdata(L, 1);
+	lua_pop(L, 1);
+	luamp_decode(L, luaL_msgpack_default, &data);
+	return lua_yaml_encode(L, luaL_yaml_default, "!push!",
+			       "tag:tarantool.io/push,2018");
+}
+
+/** The same as port_lua plain dump, but from raw MessagePack. */
+const char *
+port_msgpack_dump_plain(struct port *base, uint32_t *size)
+{
+	struct port_msgpack *port = (struct port_msgpack *) base;
+	struct lua_State *L = luaT_newthread(tarantool_L);
+	if (L == NULL)
+		return NULL;
+	/*
+	 * Create a new thread and pop it immediately from the
+	 * main stack. So as it would not stay there in case
+	 * something would throw in this function.
+	 */
+	int coro_ref = luaL_ref(tarantool_L, LUA_REGISTRYINDEX);
+	/*
+	 * MessagePack -> Lua -> YAML. The middle is not really
+	 * needed here, but there is no MessagePack -> YAML
+	 * encoder yet.
+	 */
+	int top = lua_gettop(L);
+	lua_pushcfunction(L, lua_port_msgpack_dump_plain);
+	lua_pushlightuserdata(L, (void *) port->data);
+	if (lua_pcall(L, 1, LUA_MULTRET, 0) != 0 ||
+	    lua_gettop(L) - top == 2) {
+		/*
+		 * Nil and error string are pushed onto the stack
+		 * if that was a YAML error. Only error string is
+		 * pushed in case it was a Lua error. In both
+		 * cases top of the stack is a string.
+		 */
+		assert(lua_isstring(L, -1));
+		diag_set(ClientError, ER_PROC_LUA, lua_tostring(L, -1));
+		goto error;
+	}
+	assert(lua_gettop(L) - top == 1);
+	assert(lua_isstring(L, -1));
+	size_t len;
+	const char *result = lua_tolstring(L, -1, &len);
+	*size = (uint32_t) len;
+	/*
+	 * The result string should be copied, because the stack,
+	 * keeping the string, is going to be destroyed in the
+	 * next lines.
+	 * Can't use region, because somebody should free it, and
+	 * its purpose is to free many objects at once. In this
+	 * case only one string should be allocated and freed
+	 * right after usage. Heap is fine for that.
+	 * Can't use the global tarantool_lua_ibuf, because the
+	 * plain dumper is used by session push, which yields in
+	 * coio. And during that yield the ibuf can be reset by
+	 * another fiber.
+	 */
+	char *buffer = (char *) strdup(result);
+	if (buffer == NULL) {
+		diag_set(OutOfMemory, len + 1, "strdup", "buffer");
+		goto error;
+	}
+	assert(port->buffer == NULL);
+	port->buffer = buffer;
+	luaL_unref(tarantool_L, LUA_REGISTRYINDEX, coro_ref);
+	return buffer;
+error:
+	luaL_unref(tarantool_L, LUA_REGISTRYINDEX, coro_ref);
+	return NULL;
 }
 
 /**
