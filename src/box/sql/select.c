@@ -1418,7 +1418,6 @@ sql_key_info_new(sql *db, uint32_t part_count)
 		sqlOomFault(db);
 		return NULL;
 	}
-	key_info->db = db;
 	key_info->key_def = NULL;
 	key_info->refs = 1;
 	key_info->part_count = part_count;
@@ -1444,7 +1443,6 @@ sql_key_info_new_from_key_def(sql *db, const struct key_def *key_def)
 		sqlOomFault(db);
 		return NULL;
 	}
-	key_info->db = db;
 	key_info->key_def = NULL;
 	key_info->refs = 1;
 	key_info->part_count = key_def->part_count;
@@ -1469,7 +1467,7 @@ sql_key_info_unref(struct sql_key_info *key_info)
 	if (--key_info->refs == 0) {
 		if (key_info->key_def != NULL)
 			key_def_delete(key_info->key_def);
-		sqlDbFree(key_info->db, key_info);
+		sqlDbFree(sql_get(), key_info);
 	}
 }
 

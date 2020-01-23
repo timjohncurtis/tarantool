@@ -4106,7 +4106,6 @@ sql_analysis_load(struct sql *db);
  * are compared by VDBE, see P4_KEYINFO.
  */
 struct sql_key_info {
-	sql *db;
 	/**
 	 * Key definition created from this object,
 	 * see sql_key_info_to_key_def().
