@@ -42,6 +42,8 @@
 #include "box/user.h"
 #include "box/schema.h"
 #include "box/port.h"
+#include "box/session_settings.h"
+#include "tt_static.h"
 
 static const char *sessionlib_name = "box.session";
 
@@ -411,6 +413,95 @@ lbox_session_on_access_denied(struct lua_State *L)
 				  lbox_push_on_access_denied_event, NULL);
 }
 
+static int
+lbox_session_setting_get(struct lua_State *L)
+{
+	lua_getfield(L, -1, "_id");
+	int sid = lua_tointeger(L, -1);
+	const char *mp_pair, *mp_pair_end;
+	session_settings[sid].get(sid, &mp_pair, &mp_pair_end);
+	uint32_t len;
+	mp_decode_array(&mp_pair);
+	mp_decode_str(&mp_pair, &len);
+	enum field_type field_type = session_settings[sid].field_type;
+	if (field_type == FIELD_TYPE_BOOLEAN) {
+		bool value = mp_decode_bool(&mp_pair);
+		lua_pushboolean(L, value);
+	} else {
+		const char *str = mp_decode_str(&mp_pair, &len);
+		lua_pushlstring(L, str, len);
+	}
+	return 1;
+}
+
+static int
+lbox_session_setting_set(struct lua_State *L)
+{
+	if (lua_gettop(L) != 2)
+		return luaL_error(L, "Usage: box.session.settings:set(value)");
+	int arg_type = lua_type(L, -1);
+	lua_getfield(L, -2, "_id");
+	int sid = lua_tointeger(L, -1);
+	struct session_setting *setting = &session_settings[sid];
+	lua_pop(L, 1);
+	switch (arg_type) {
+	case LUA_TBOOLEAN: {
+		bool value = lua_toboolean(L, -1);
+		size_t size = mp_sizeof_bool(value);
+		char *mp_value = (char *) static_alloc(size);
+		mp_encode_bool(mp_value, value);
+		if (setting->set(sid, mp_value) != 0)
+			return luaT_push_nil_and_error(L);
+		break;
+	}
+	case LUA_TSTRING: {
+		const char *str = lua_tostring(L, -1);
+		size_t len = strlen(str);
+		uint32_t size = mp_sizeof_str(len);
+		char *mp_value = (char *) static_alloc(size);
+		if (mp_value == NULL) {
+			diag_set(OutOfMemory, size, "static_alloc",
+				 "mp_value");
+			return luaT_error(L);
+		}
+		mp_encode_str(mp_value, str, len);
+		if (setting->set(sid, mp_value) != 0)
+			return luaT_push_nil_and_error(L);
+		break;
+	}
+	default:
+		diag_set(ClientError, ER_SESSION_SETTING_INVALID_VALUE,
+			 session_setting_strs[sid],
+			 field_type_strs[setting->field_type]);
+		return luaT_push_nil_and_error(L);
+	}
+	return 0;
+}
+
+static void
+lbox_session_settings_init(struct lua_State *L)
+{
+	lua_createtable(L, 0, 2);
+	lua_pushcfunction(L, lbox_session_setting_get);
+	lua_setfield(L, -2, "__serialize");
+	lua_createtable(L, 0, 1);
+	lua_pushcfunction(L, lbox_session_setting_set);
+	lua_setfield(L, -2, "set");
+	lua_setfield(L, -2, "__index");
+
+	lua_newtable(L);
+	for (int id = 0; id < SESSION_SETTING_COUNT; ++id) {
+		lua_newtable(L);
+		lua_pushinteger(L, id);
+		lua_setfield(L, -2, "_id");
+		lua_pushvalue(L, -3);
+		lua_setmetatable(L, -2);
+		lua_setfield(L, -2, session_setting_strs[id]);
+	}
+	lua_setfield(L, -3, "settings");
+	lua_pop(L, 1);
+}
+
 void
 session_storage_cleanup(int sid)
 {
@@ -478,5 +569,6 @@ box_lua_session_init(struct lua_State *L)
 		{NULL, NULL}
 	};
 	luaL_register_module(L, sessionlib_name, sessionlib);
+	lbox_session_settings_init(L);
 	lua_pop(L, 1);
 }
