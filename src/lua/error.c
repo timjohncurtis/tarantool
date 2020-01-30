@@ -34,7 +34,43 @@
 #include <fiber.h>
 #include "utils.h"
 
+#include <string.h>
+
 static int CTID_CONST_STRUCT_ERROR_REF = 0;
+
+/*
+ * Memory for the traceback string is obtained with malloc,
+ * and can be freed with free.
+*/
+static char*
+traceback (lua_State *L) {
+	int top = lua_gettop(L);
+
+	lua_getfield(L, LUA_GLOBALSINDEX, "debug");
+	if (!lua_istable(L, -1)) {
+		lua_settop(L, top);
+		return NULL;
+	}
+	lua_getfield(L, -1, "traceback");
+	if (!lua_isfunction(L, -1)) {
+		lua_settop(L, top);
+		return NULL;
+	}
+
+	// call debug.traceback
+	lua_call(L, 0, 1);
+
+	// get result of the debug.traceback call
+	if (!lua_isstring(L, -1)) {
+		lua_settop(L, top);
+		return NULL;
+	}
+
+	char *bt = strdup(lua_tostring(L, -1));
+	lua_settop(L, top);
+
+	return bt;
+}
 
 struct error *
 luaL_iserror(struct lua_State *L, int narg)
@@ -53,7 +89,7 @@ luaL_iserror(struct lua_State *L, int narg)
 	return e;
 }
 
-static struct error *
+struct error *
 luaL_checkerror(struct lua_State *L, int narg)
 {
 	struct error *error = luaL_iserror(L, narg);
@@ -85,6 +121,10 @@ luaT_pusherror(struct lua_State *L, struct error *e)
 	 * then set the finalizer.
 	 */
 	error_ref(e);
+
+	if (e->lua_bt == NULL)
+		e->lua_bt = traceback(L);
+
 	assert(CTID_CONST_STRUCT_ERROR_REF != 0);
 	struct error **ptr = (struct error **)
 		luaL_pushcdata(L, CTID_CONST_STRUCT_ERROR_REF);

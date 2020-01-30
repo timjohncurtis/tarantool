@@ -42,6 +42,7 @@ extern "C" {
 static void
 exception_destroy(struct error *e)
 {
+	free(e->lua_bt);
 	delete (Exception *) e;
 }
 

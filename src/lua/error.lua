@@ -24,6 +24,7 @@ struct error {
     char _file[DIAG_FILENAME_MAX];
     /* Error description. */
     char _errmsg[DIAG_ERRMSG_MAX];
+    char *lua_bt;
 };
 
 char *
@@ -83,8 +84,16 @@ local function error_trace(err)
         return {}
     end
     return {
-        { file = ffi.string(err._file), line = tonumber(err._line) };
+        { file = ffi.string(err._file), line = tonumber(err._line) }
     }
+end
+
+local function error_backtrace(err)
+    local result = "Backtrace is absent"
+    if err.lua_bt ~= ffi.nullptr then
+        result = ffi.string(err.lua_bt)
+    end
+    return result
 end
 
 local function error_errno(err)
@@ -96,10 +105,11 @@ local function error_errno(err)
 end
 
 local error_fields = {
-    ["type"]        = error_type;
-    ["message"]     = error_message;
-    ["trace"]       = error_trace;
-    ["errno"]       = error_errno;
+    ["type"] = error_type,
+    ["message"] = error_message,
+    ["trace"] = error_trace,
+    ["errno"] = error_errno,
+    ["bt"] = error_backtrace
 }
 
 local function error_unpack(err)

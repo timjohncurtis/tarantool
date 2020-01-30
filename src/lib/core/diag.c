@@ -53,6 +53,7 @@ error_create(struct error *e,
 		e->line = 0;
 	}
 	e->errmsg[0] = '\0';
+	e->lua_bt = NULL;
 }
 
 struct diag *

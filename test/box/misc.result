@@ -125,14 +125,32 @@ e
 ---
 - Illegal parameters, bla bla
 ...
-e:unpack()
+unpack_res = e:unpack()
 ---
-- type: ClientError
-  code: 1
-  message: Illegal parameters, bla bla
-  trace:
-  - file: '[C]'
-    line: 4294967295
+...
+unpack_res['code'] == 1
+---
+- true
+...
+unpack_res['trace'][1]['file'] == '[C]'
+---
+- true
+...
+unpack_res['trace'][1]['line'] == 4294967295
+---
+- true
+...
+unpack_res['type'] == 'ClientError'
+---
+- true
+...
+unpack_res['message'] == 'Illegal parameters, bla bla'
+---
+- true
+...
+unpack_res['bt'] == e.bt
+---
+- true
 ...
 e.type
 ---

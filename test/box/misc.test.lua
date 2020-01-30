@@ -35,7 +35,15 @@ box.error(box.error.ILLEGAL_PARAMS, "bla bla")
 box.error()
 e = box.error.last()
 e
-e:unpack()
+
+unpack_res = e:unpack()
+unpack_res['code'] == 1
+unpack_res['trace'][1]['file'] == '[C]'
+unpack_res['trace'][1]['line'] == 4294967295
+unpack_res['type'] == 'ClientError'
+unpack_res['message'] == 'Illegal parameters, bla bla'
+unpack_res['bt'] == e.bt
+
 e.type
 e.code
 e.message

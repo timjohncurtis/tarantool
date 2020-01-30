@@ -84,6 +84,7 @@ struct error {
 	char file[DIAG_FILENAME_MAX];
 	/* Error description. */
 	char errmsg[DIAG_ERRMSG_MAX];
+	char *lua_bt;
 };
 
 static inline void
