@@ -132,9 +132,22 @@ s:get('sql_defer_foreign_keys').value
 s:update('sql_defer_foreign_keys', {{'=', 2, false}})
 settings.sql_defer_foreign_keys
 
+box.execute([[set "sql_default_engine" = 'vinyl']])
+s:get('sql_default_engine').value
+box.execute([[set "sql_default_engine" = 'memtx']])
+s:get('sql_default_engine').value
+box.execute([[set "sql_defer_foreign_keys" = true]])
+s:get('sql_defer_foreign_keys').value
+box.execute([[set "sql_defer_foreign_keys" = ?]], {false})
+s:get('sql_defer_foreign_keys').value
+
 settings.sql_default_engine:set(true)
 settings.sql_defer_foreign_keys:set(false, 1, 2, 3)
 settings.sql_parser_debug:set('string')
 
 str = string.rep('a', 20 * 1024)
 box.session.settings.sql_default_engine:set(str)
+
+box.execute([[set "sql_def_engine" = true]])
+box.execute([[set "sql_default_engine" = true]])
+box.execute([[set "sql_defer_foreign_keys" = 'true']])
