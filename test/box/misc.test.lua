@@ -99,6 +99,15 @@ type(err.errno)
 err = box.error.new(box.error.PROC_LUA, "errno")
 type(err.errno)
 
+--
+-- gh-4398-expose-error-module
+--
+
+err_custom = box.error.new(box.error.CUSTOM_ERROR, "My Custom Type", "Reason")
+err_custom.type == "CustomError"
+err_custom.custom_type == "My Custom Type"
+err_custom.message == "User custom error: Reason"
+
 ----------------
 -- # box.stat
 ----------------

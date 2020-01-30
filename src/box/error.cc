@@ -86,6 +86,17 @@ box_error_set(const char *file, unsigned line, uint32_t code,
 	return -1;
 }
 
+int
+box_custom_error_set(const char *file, unsigned line,
+		     const char *custom, const char *reason)
+{
+	struct error *e = BuildCustomError(file, line, custom);
+	strncpy(e->errmsg, reason, DIAG_ERRMSG_MAX);
+	e->errmsg[DIAG_ERRMSG_MAX - 1] = '\0';
+	diag_add_error(&fiber()->diag, e);
+	return -1;
+}
+
 /* }}} */
 
 struct rmean *rmean_error = NULL;
@@ -249,6 +260,41 @@ BuildAccessDeniedError(const char *file, unsigned int line,
 		return new AccessDeniedError(file, line, access_type,
 					     object_type, object_name,
 					     user_name);
+	} catch (OutOfMemory *e) {
+		return e;
+	}
+}
+
+static struct method_info customerror_methods[] = {
+	make_method(&type_CustomError, "custom_type", &CustomError::custom_type),
+	METHODS_SENTINEL
+};
+
+const struct type_info type_CustomError =
+	make_type("CustomError", &type_ClientError,
+		  customerror_methods);
+
+CustomError::CustomError(const char *file, unsigned int line,
+			 const char *custom_type)
+	:ClientError(&type_CustomError, file, line, ER_CUSTOM_ERROR)
+{
+	error_format_msg(this, tnt_errcode_desc(m_errcode),
+			 custom_type ?: "");
+
+	if (custom_type) {
+		strncpy(m_custom_type, custom_type, 63);
+		m_custom_type[63] = '\0';
+	} else {
+		m_custom_type[0] = '\0';
+	}
+}
+
+struct error *
+BuildCustomError(const char *file, unsigned int line,
+		 const char *custom_type)
+{
+	try {
+		return new CustomError(file, line, custom_type);
 	} catch (OutOfMemory *e) {
 		return e;
 	}

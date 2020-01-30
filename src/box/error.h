@@ -53,6 +53,9 @@ struct error *
 BuildXlogGapError(const char *file, unsigned line,
 		  const struct vclock *from, const struct vclock *to);
 
+struct error *
+BuildCustomError(const char *file, unsigned int line, const char *custom_type);
+
 /** \cond public */
 
 struct error;
@@ -129,6 +132,10 @@ int
 box_error_set(const char *file, unsigned line, uint32_t code,
 	      const char *format, ...);
 
+int
+box_custom_error_set(const char *file, unsigned line,
+                     const char *custom, const char *reason);
+
 /**
  * A backward-compatible API define.
  */
@@ -140,6 +147,7 @@ box_error_set(const char *file, unsigned line, uint32_t code,
 extern const struct type_info type_ClientError;
 extern const struct type_info type_XlogError;
 extern const struct type_info type_AccessDeniedError;
+extern const struct type_info type_CustomError;
 
 #if defined(__cplusplus)
 } /* extern "C" */
@@ -264,6 +272,22 @@ struct XlogGapError: public XlogError
 		     const struct vclock *from, const struct vclock *to);
 
 	virtual void raise() { throw this; }
+};
+
+class CustomError: public ClientError
+{
+public:
+	CustomError(const char *file, unsigned int line,
+		    const char *custom_type);
+
+	const char*
+	custom_type()
+	{
+		return m_custom_type;
+	}
+private:
+	/** Custom type name*/
+	char m_custom_type[64];
 };
 
 #endif /* defined(__cplusplus) */

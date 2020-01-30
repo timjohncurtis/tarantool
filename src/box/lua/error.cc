@@ -43,31 +43,35 @@ extern "C" {
 #include "box/error.h"
 
 static void
-luaT_error_create(lua_State *L, int top_base)
-{
-	uint32_t code = 0;
-	const char *reason = NULL;
-	const char *file = "";
-	unsigned line = 0;
-	lua_Debug info;
+luaT_error_read_args(lua_State *L, int top_base, uint32_t *code,
+		     const char **custom_type, const char **reason) {
 	int top = lua_gettop(L);
 	if (top >= top_base && lua_type(L, top_base) == LUA_TNUMBER) {
-		code = lua_tonumber(L, top_base);
-		reason = tnt_errcode_desc(code);
+		*code = lua_tonumber(L, top_base);
+		*reason = tnt_errcode_desc(*code);
 		if (top > top_base) {
+			int shift = 1;
+			if (*code == ER_CUSTOM_ERROR) {
+				*custom_type = lua_tostring(L, top_base + 1);
+				shift = 2;
+			}
+
 			/* Call string.format(reason, ...) to format message */
 			lua_getglobal(L, "string");
 			if (lua_isnil(L, -1))
-				goto raise;
+				return;
 			lua_getfield(L, -1, "format");
 			if (lua_isnil(L, -1))
-				goto raise;
-			lua_pushstring(L, reason);
-			for (int i = top_base + 1; i <= top; i++)
+				return;
+
+			lua_pushstring(L, *reason);
+			int nargs = 1;
+			for (int i = top_base + shift; i <= top; ++i, ++nargs)
 				lua_pushvalue(L, i);
-			lua_call(L, top - top_base + 1, 1);
-			reason = lua_tostring(L, -1);
-		} else if (strchr(reason, '%') != NULL) {
+
+			lua_call(L, nargs, 1);
+			*reason = lua_tostring(L, -1);
+		} else if (strchr(*reason, '%') != NULL) {
 			/* Missing arguments to format string */
 			luaL_error(L, "box.error(): bad arguments");
 		}
@@ -75,12 +79,15 @@ luaT_error_create(lua_State *L, int top_base)
 		if (lua_istable(L, top_base)) {
 			/* A special case that rethrows raw error (used by net.box) */
 			lua_getfield(L, top_base, "code");
-			code = lua_tonumber(L, -1);
+			*code = lua_tonumber(L, -1);
 			lua_pop(L, 1);
+			if (*code == ER_CUSTOM_ERROR) {
+				lua_getfield(L, top_base, "custom_type");
+				*custom_type = lua_tostring(L, -1);
+				lua_pop(L, 1);
+			}
 			lua_getfield(L, top_base, "reason");
-			reason = lua_tostring(L, -1);
-			if (reason == NULL)
-				reason = "";
+			*reason = lua_tostring(L, -1);
 			lua_pop(L, 1);
 		} else if (luaL_iserror(L, top_base)) {
 			lua_error(L);
@@ -90,7 +97,21 @@ luaT_error_create(lua_State *L, int top_base)
 		luaL_error(L, "box.error(): bad arguments");
 	}
 
-raise:
+	return;
+}
+
+static void
+luaT_error_create(lua_State *L, int top_base)
+{
+	uint32_t code = 0;
+	const char *custom_type = NULL;
+	const char *reason = NULL;
+
+	luaT_error_read_args(L, top_base, &code, &custom_type, &reason);
+
+	const char *file = "";
+	unsigned line = 0;
+	lua_Debug info;
 	if (lua_getstack(L, 1, &info) && lua_getinfo(L, "Sl", &info)) {
 		if (*info.short_src) {
 			file = info.short_src;
@@ -101,8 +122,16 @@ raise:
 		}
 		line = info.currentline;
 	}
+
+	if (reason == NULL)
+		reason = "";
 	say_debug("box.error() at %s:%i", file, line);
-	box_error_set(file, line, code, "%s", reason);
+	if (code == ER_CUSTOM_ERROR) {
+		box_custom_error_set(file, line,
+				     custom_type ? custom_type : "", reason);
+	} else {
+		box_error_set(file, line, code, "%s", reason);
+	}
 }
 
 static int
@@ -142,6 +171,28 @@ luaT_error_new(lua_State *L)
 	luaT_error_create(L, 1);
 	lua_settop(L, 0);
 	return luaT_error_last(L);
+}
+
+static int
+luaT_error_custom_type(lua_State *L)
+{
+	struct error *e = luaL_checkerror(L, -1);
+
+	if (e->type == NULL || e->type->name == NULL
+	    || strcmp(e->type->name, "CustomError")) {
+		lua_pushfstring(L, "%s has't a custom type",e->type->name);
+		return 1;;
+	}
+
+	const struct method_info *custom_type_m =
+			type_method_by_name(e->type, "custom_type");
+	assert(custom_type_m != NULL);
+
+	const char *custom_type = exception_get_string(e, custom_type_m);
+	assert(custom_type != NULL);
+
+	lua_pushstring(L, custom_type);
+	return 1;
 }
 
 static int
@@ -267,6 +318,10 @@ box_lua_error_init(struct lua_State *L) {
 		{
 			lua_pushcfunction(L, luaT_error_new);
 			lua_setfield(L, -2, "new");
+		}
+		{
+			lua_pushcfunction(L, luaT_error_custom_type);
+			lua_setfield(L, -2, "custom_type");
 		}
 		lua_setfield(L, -2, "__index");
 	}

@@ -308,6 +308,24 @@ type(err.errno)
 ---
 - nil
 ...
+--
+-- gh-4398-expose-error-module
+--
+err_custom = box.error.new(box.error.CUSTOM_ERROR, "My Custom Type", "Reason")
+---
+...
+err_custom.type == "CustomError"
+---
+- true
+...
+err_custom.custom_type == "My Custom Type"
+---
+- true
+...
+err_custom.message == "User custom error: Reason"
+---
+- true
+...
 ----------------
 -- # box.stat
 ----------------
@@ -654,6 +672,7 @@ t;
   209: box.error.SESSION_SETTING_INVALID_VALUE
   210: box.error.SQL_PREPARE
   211: box.error.WRONG_QUERY_ID
+  212: box.error.CUSTOM_ERROR
 ...
 test_run:cmd("setopt delimiter ''");
 ---
