@@ -104,6 +104,10 @@ local function error_errno(err)
     return e
 end
 
+local function error_custom_type(err)
+    return box.error.custom_type(err)
+end
+
 local error_fields = {
     ["type"]        = error_type,
     ["message"]     = error_message,
@@ -148,11 +152,16 @@ local function error_serialize(err)
     return error_message(err)
 end
 
+local function error_is_custom(err)
+    return ffi.string(err._type.name) == 'CustomError'
+end
+
 local error_methods = {
-    ["unpack"] = error_unpack;
-    ["raise"] = error_raise;
-    ["match"] = error_match; -- Tarantool 1.6 backward compatibility
-    ["__serialize"] = error_serialize;
+    ["unpack"] = error_unpack,
+    ["raise"] = error_raise,
+    ["match"] = error_match, -- Tarantool 1.6 backward compatibility
+    ["is_custom"] = error_is_custom,
+    ["__serialize"] = error_serialize
 }
 
 local function error_index(err, key)
@@ -181,11 +190,11 @@ local function error_concat(lhs, rhs)
 end
 
 local error_mt = {
-    __index = error_index;
-    __tostring = error_message;
-    __concat = error_concat;
+    __index = error_index,
+    __tostring = error_message,
+    __concat = error_concat
 };
 
-ffi.metatype('struct error', error_mt);
+ffi.metatype('struct error', error_mt)
 
 return error
