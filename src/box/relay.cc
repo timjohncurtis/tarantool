@@ -322,7 +322,9 @@ relay_initial_join(int fd, uint64_t sync, struct vclock *vclock)
 
 	/* Respond to the JOIN request with the current vclock. */
 	struct xrow_header row;
-	xrow_encode_vclock_xc(&row, vclock);
+	struct vclock subst_vclock;
+	vclock_copy_ignore0(&subst_vclock, vclock);
+	xrow_encode_vclock_xc(&row, &subst_vclock);
 	row.sync = sync;
 	coio_write_xrow(&relay->io, &row);
 
@@ -464,7 +466,7 @@ relay_schedule_pending_gc(struct relay *relay, const struct vclock *vclock)
 		 * the greater signatures is due to changes pulled
 		 * from other members of the cluster.
 		 */
-		if (vclock_compare(&curr->vclock, vclock) > 0)
+		if (vclock_compare_ignore0(&curr->vclock, vclock) > 0)
 			break;
 		stailq_shift(&relay->pending_gc);
 		free(gc_msg);

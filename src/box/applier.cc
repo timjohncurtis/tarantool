@@ -173,7 +173,9 @@ applier_writer_f(va_list ap)
 			continue;
 		try {
 			struct xrow_header xrow;
-			xrow_encode_vclock(&xrow, &replicaset.vclock);
+			struct vclock vclock;
+			vclock_copy_ignore0(&vclock, &replicaset.vclock);
+			xrow_encode_vclock(&xrow, &vclock);
 			coio_write_xrow(&io, &xrow);
 		} catch (SocketError *e) {
 			/*

@@ -1539,7 +1539,7 @@ box_process_fetch_snapshot(struct ev_io *io, struct xrow_header *header)
 
 	/* Remember master's vclock after the last request */
 	struct vclock stop_vclock;
-	vclock_copy(&stop_vclock, &replicaset.vclock);
+	vclock_copy_ignore0(&stop_vclock, &replicaset.vclock);
 
 	/* Send end of snapshot data marker */
 	struct xrow_header row;
@@ -1621,7 +1621,8 @@ box_process_register(struct ev_io *io, struct xrow_header *header)
 
 	struct xrow_header row;
 	/* Send end of WAL stream marker */
-	xrow_encode_vclock_xc(&row, &replicaset.vclock);
+	vclock_copy_ignore0(&vclock, &replicaset.vclock);
+	xrow_encode_vclock_xc(&row, &vclock);
 	row.sync = header->sync;
 	coio_write_xrow(io, &row);
 
@@ -1773,7 +1774,10 @@ box_process_join(struct ev_io *io, struct xrow_header *header)
 	say_info("final data sent.");
 
 	/* Send end of WAL stream marker */
-	xrow_encode_vclock_xc(&row, &replicaset.vclock);
+	struct vclock vclock;
+	vclock_copy_ignore0(&vclock, &replicaset.vclock);
+	xrow_encode_vclock_xc(&row, &vclock);
+
 	row.sync = header->sync;
 	coio_write_xrow(io, &row);
 
@@ -1904,7 +1908,7 @@ box_process_vote(struct ballot *ballot)
 	 */
 	ballot->is_loading = is_ro;
 	vclock_copy(&ballot->vclock, &replicaset.vclock);
-	vclock_copy(&ballot->gc_vclock, &gc.vclock);
+	vclock_copy_ignore0(&ballot->gc_vclock, &gc.vclock);
 }
 
 /** Insert a new cluster into _schema */
