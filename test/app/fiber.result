@@ -1036,14 +1036,33 @@ st;
 ---
 - false
 ...
-e:unpack();
+unpack_res = e:unpack();
 ---
-- type: ClientError
-  code: 1
-  message: Illegal parameters, oh my
-  trace:
-  - file: '[string "function err() box.error(box.error.ILLEGAL_PA..."]'
-    line: 1
+...
+unpack_res['code'] == 1;
+---
+- true
+...
+unpack_res['trace'][1]['file'] == '[string "function err()' ..
+    ' box.error(box.error.ILLEGAL_PA..."]';
+---
+- true
+...
+unpack_res['trace'][1]['line'] == 1;
+---
+- true
+...
+unpack_res['type'] == 'ClientError';
+---
+- true
+...
+unpack_res['message'] == 'Illegal parameters, oh my';
+---
+- true
+...
+unpack_res['bt'] == e.bt;
+---
+- true
 ...
 flag = false;
 ---

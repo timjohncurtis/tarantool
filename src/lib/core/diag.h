@@ -84,6 +84,8 @@ struct error {
 	char file[DIAG_FILENAME_MAX];
 	/* Error description. */
 	char errmsg[DIAG_ERRMSG_MAX];
+	/* Lua backtrace */
+	char *lua_bt;
 };
 
 static inline void
@@ -125,6 +127,9 @@ error_format_msg(struct error *e, const char *format, ...);
 
 void
 error_vformat_msg(struct error *e, const char *format, va_list ap);
+
+void
+error_set_lua_bt(struct error *e, const char *lua_bt);
 
 /**
  * Diagnostics Area - a container for errors

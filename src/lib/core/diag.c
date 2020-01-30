@@ -53,6 +53,7 @@ error_create(struct error *e,
 		e->line = 0;
 	}
 	e->errmsg[0] = '\0';
+	e->lua_bt = NULL;
 }
 
 struct diag *
@@ -76,3 +77,22 @@ error_vformat_msg(struct error *e, const char *format, va_list ap)
 	vsnprintf(e->errmsg, sizeof(e->errmsg), format, ap);
 }
 
+void
+error_set_lua_bt(struct error *e, const char *lua_bt)
+{
+	if (e == NULL)
+		return;
+
+	if (lua_bt == NULL) {
+		free(e->lua_bt);
+		e->lua_bt = NULL;
+		return;
+	}
+
+	size_t bt_len = strlen(lua_bt);
+	e->lua_bt = realloc(e->lua_bt, bt_len + 1);
+	if (e->lua_bt == NULL)
+		return;
+	strcpy(e->lua_bt, lua_bt);
+	return;
+}

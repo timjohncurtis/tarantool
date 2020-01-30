@@ -428,7 +428,16 @@ function test1()
 end;
 st, e = test1();
 st;
-e:unpack();
+
+unpack_res = e:unpack();
+
+unpack_res['code'] == 1;
+unpack_res['trace'][1]['file'] == '[string "function err()' ..
+    ' box.error(box.error.ILLEGAL_PA..."]';
+unpack_res['trace'][1]['line'] == 1;
+unpack_res['type'] == 'ClientError';
+unpack_res['message'] == 'Illegal parameters, oh my';
+unpack_res['bt'] == e.bt;
 
 flag = false;
 function test2()
