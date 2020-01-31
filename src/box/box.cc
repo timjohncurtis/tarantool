@@ -2312,7 +2312,13 @@ box_init(void)
 	if (module_init() != 0)
 		diag_raise();
 
-	if (tuple_init(lua_hash) != 0)
+	if (tuple_init(
+#ifdef ENABLE_LUAVELA
+		NULL
+#else
+		lua_hash
+#endif /* ENABLE_LUAVELA */
+		) != 0)
 		diag_raise();
 
 	sequence_init();
