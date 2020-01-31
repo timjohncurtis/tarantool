@@ -336,6 +336,24 @@ tt_pthread_attr_getstack(pthread_t thread, void **stackaddr, size_t *stacksize)
 	pthread_getattr_np(thread, &thread_attr);
 	pthread_attr_getstack(&thread_attr, stackaddr, stacksize);
 	pthread_attr_destroy(&thread_attr);
+#elif HAVE_PTHREAD_STACKSEG_NP
+	/*
+	 * OpenBSD
+	 */
+        #if defined(__OpenBSD__)
+        #include <sys/signal.h>
+        //#include <pthread_np.h>
+        #endif
+
+	//pthread_attr_t thread_attr;
+        //stack_t ss;
+        //pthread_stackseg_np(thread, &ss);
+	//pthread_stackseg_np(thread, &thread_attr);
+        //*stackaddr = (void*)((size_t) ss.ss_sp - ss.ss_size);
+        //stacksize = &ss.ss_size;
+	thread = NULL;
+	// pthread_attr_getstack(&thread_attr, stackaddr, stacksize);
+	// pthread_attr_destroy(&thread_attr);
 #elif HAVE_PTHREAD_ATTR_GET_NP
 	/*
 	 * xBSD/new macOS
