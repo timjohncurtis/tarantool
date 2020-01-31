@@ -182,6 +182,19 @@ vclock_inc(struct vclock *vclock, uint32_t replica_id)
 	return ++vclock->lsn[replica_id];
 }
 
+/**
+ * Set vclock component represented by replica id to the desired
+ * value. Can be used to decrease stored LSN value for the given
+ * replica id while maintaining a valid signature or in the same
+ * manner as vclock_follow.
+ *
+ * @param vclock Vector clock.
+ * @param replica_id Replica identifier.
+ * @param lsn Lsn to set
+ */
+void
+vclock_reset(struct vclock *vclock, uint32_t replica_id, int64_t lsn);
+
 static inline void
 vclock_copy(struct vclock *dst, const struct vclock *src)
 {
@@ -192,6 +205,17 @@ vclock_copy(struct vclock *dst, const struct vclock *src)
 	unsigned int max_pos = VCLOCK_MAX - bit_clz_u32(src->map | 0x01);
 	memcpy(dst, src, offsetof(struct vclock, lsn) +
 			 sizeof(*dst->lsn) * max_pos);
+}
+
+/**
+ * A shortcut for vclock_copy() + vclock_reset() for 0th clock
+ * component.
+ */
+static inline void
+vclock_copy_ignore0(struct vclock *dst, const struct vclock *src)
+{
+	vclock_copy(dst, src);
+	vclock_reset(dst, 0, 0);
 }
 
 static inline uint32_t
