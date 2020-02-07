@@ -48,6 +48,7 @@
 #include "box/lua/execute.h"
 #include "box/sql_stmt_cache.h"
 #include "session.h"
+#include "rmean.h"
 
 const char *sql_info_key_strs[] = {
 	"row_count",
@@ -608,6 +609,7 @@ sql_prepare(const char *sql, int len, struct port *port)
 {
 	uint32_t stmt_id = sql_stmt_calculate_id(sql, len);
 	struct sql_stmt *stmt = sql_stmt_cache_find(stmt_id);
+	rmean_collect(rmean_box, IPROTO_PREPARE, 1);
 	if (stmt == NULL) {
 		if (sql_stmt_compile(sql, len, NULL, &stmt, NULL) != 0)
 			return -1;
@@ -669,6 +671,7 @@ static inline int
 sql_execute(struct sql_stmt *stmt, struct port *port, struct region *region)
 {
 	int rc, column_count = sql_column_count(stmt);
+	rmean_collect(rmean_box, IPROTO_EXECUTE, 1);
 	if (column_count > 0) {
 		/* Either ROW or DONE or ERROR. */
 		while ((rc = sql_step(stmt)) == SQL_ROW) {
