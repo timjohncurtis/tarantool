@@ -44,6 +44,7 @@
 #include "box/fk_constraint.h"
 #include "box/txn.h"
 #include "box/tuple.h"
+#include "box/tuple_compare.h"
 #include "box/port.h"
 #include "sqlInt.h"
 #include "vdbeInt.h"
@@ -2050,15 +2051,15 @@ case OP_Cast: {                  /* in1 */
  * jump to address P2.  Or if the SQL_STOREP2 flag is set in P5, then
  * store the result of comparison in register P2.
  *
- * Once any conversions have taken place, and neither value is NULL,
- * the values are compared. If both values are blobs then memcmp() is
- * used to determine the results of the comparison.  If both values
- * are text, then the appropriate collating function specified in
- * P4 is used to do the comparison.  If P4 is not specified then
- * memcmp() is used to compare text string.  If both values are
- * numeric, then a numeric comparison is used. If the two values
- * are of different types, then numbers are considered less than
- * strings and strings are considered less than blobs.
+ * If neither value is NULL, the values are compared. If both
+ * values are blobs then memcmp() is used to determine the results
+ * of the comparison. If both values are booleans, TRUE if more
+ * than FALSE. If both values are text, then the appropriate
+ * collating function specified in P4 is used to do the
+ * comparison. If P4 is not specified then memcmp() is used to
+ * compare text string. If both values are numeric, then a numeric
+ * comparison is used. If both values are not NULL and the above
+ * rules cannot be applied to them, an error is generated.
  *
  * If SQL_NULLEQ is set in P5 then the result of comparison is always either
  * true or false and is never NULL.  If both operands are NULL then the result
@@ -2096,15 +2097,8 @@ case OP_Cast: {                  /* in1 */
  * reg(P3) is NULL then the take the jump.  If the SQL_JUMPIFNULL
  * bit is clear then fall through if either operand is NULL.
  *
- * Once any conversions have taken place, and neither value is NULL,
- * the values are compared. If both values are blobs then memcmp() is
- * used to determine the results of the comparison.  If both values
- * are text, then the appropriate collating function specified in
- * P4 is  used to do the comparison.  If P4 is not specified then
- * memcmp() is used to compare text string.  If both values are
- * numeric, then a numeric comparison is used. If the two values
- * are of different types, then numbers are considered less than
- * strings and strings are considered less than blobs.
+ * See the Eq opcode for additional information about comparison
+ * rules.
  */
 /* Opcode: Le P1 P2 P3 P4 P5
  * Synopsis: IF r[P3]<=r[P1]
@@ -2133,189 +2127,103 @@ case OP_Lt:               /* same as TK_LT, jump, in1, in3 */
 case OP_Le:               /* same as TK_LE, jump, in1, in3 */
 case OP_Gt:               /* same as TK_GT, jump, in1, in3 */
 case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
-	int res, res2;      /* Result of the comparison of pIn1 against pIn3 */
-	u32 flags1;         /* Copy of initial value of pIn1->flags */
-	u32 flags3;         /* Copy of initial value of pIn3->flags */
-
+	/*
+	 * Result of comparison: more than 0 if l > r,
+	 * 0 if l == r, less than 0 if l < r.
+	 */
+	int cmp_res;
+	/* Result of the operation. */
+	bool result;
 	pIn1 = &aMem[pOp->p1];
 	pIn3 = &aMem[pOp->p3];
-	flags1 = pIn1->flags;
-	flags3 = pIn3->flags;
-	enum field_type ft_p1 = pIn1->field_type;
-	enum field_type ft_p3 = pIn3->field_type;
-	if ((flags1 | flags3)&MEM_Null) {
-		/* One or both operands are NULL */
-		if (pOp->p5 & SQL_NULLEQ) {
-			/* If SQL_NULLEQ is set (which will only happen if the operator is
-			 * OP_Eq or OP_Ne) then take the jump or not depending on whether
-			 * or not both operands are null.
-			 */
-			assert(pOp->opcode==OP_Eq || pOp->opcode==OP_Ne);
-			assert((flags1 & MEM_Cleared)==0);
-			assert((pOp->p5 & SQL_JUMPIFNULL)==0);
-			if ((flags1&flags3&MEM_Null)!=0
-			    && (flags3&MEM_Cleared)==0
-				) {
-				res = 0;  /* Operands are equal */
-			} else {
-				res = 1;  /* Operands are not equal */
-			}
-		} else {
-			/* SQL_NULLEQ is clear and at least one operand is NULL,
-			 * then the result is always NULL.
-			 * The jump is taken if the SQL_JUMPIFNULL bit is set.
+	enum mp_class lclass = mp_classof(sql_value_type(&aMem[pOp->p1]));
+	enum mp_class rclass = mp_classof(sql_value_type(&aMem[pOp->p3]));
+	assert(lclass != MP_CLASS_MAP && rclass != MP_CLASS_MAP);
+	assert(lclass != MP_CLASS_ARRAY && rclass != MP_CLASS_ARRAY);
+	assert(lclass != mp_class_max && rclass != mp_class_max);
+	if (lclass == MP_CLASS_NIL || rclass == MP_CLASS_NIL) {
+		if ((pOp->p5 & SQL_NULLEQ) == 0) {
+			/*
+			 * SQL_NULLEQ is clear and at least one
+			 * operand is NULL, then the result is
+			 * always NULL. The jump is taken if the
+			 * SQL_JUMPIFNULL bit is set.
 			 */
 			if (pOp->p5 & SQL_STOREP2) {
 				pOut = vdbe_prepare_null_out(p, pOp->p2);
-				iCompare = 1;    /* Operands are not equal */
+				iCompare = 1;
 				REGISTER_TRACE(p, pOp->p2, pOut);
 			} else {
 				VdbeBranchTaken(2,3);
-				if (pOp->p5 & SQL_JUMPIFNULL) {
+				if (pOp->p5 & SQL_JUMPIFNULL)
 					goto jump_to_p2;
-				}
 			}
 			break;
 		}
-	} else if (((flags1 | flags3) & MEM_Bool) != 0 ||
-		   ((flags1 | flags3) & MEM_Blob) != 0) {
 		/*
-		 * If one of values is of type BOOLEAN or VARBINARY,
-		 * then the second one must be of the same type as
-		 * well. Otherwise an error is raised.
+		 * If SQL_NULLEQ is set (which will only happen if
+		 * the operator is OP_Eq or OP_Ne) then take the
+		 * jump or not depending on whether or not both
+		 * operands are null.
 		 */
-		int type_arg1 = flags1 & (MEM_Bool | MEM_Blob);
-		int type_arg3 = flags3 & (MEM_Bool | MEM_Blob);
-		if (type_arg1 != type_arg3) {
-			char *inconsistent_type = type_arg1 != 0 ?
-						  mem_type_to_str(pIn3) :
-						  mem_type_to_str(pIn1);
-			char *expected_type     = type_arg1 != 0 ?
-						  mem_type_to_str(pIn1) :
-						  mem_type_to_str(pIn3);
-			diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
-				 inconsistent_type, expected_type);
-			goto abort_due_to_error;
-		}
-		res = sqlMemCompare(pIn3, pIn1, NULL);
+		assert(pOp->opcode == OP_Eq || pOp->opcode == OP_Ne);
+		assert((pOp->p5 & SQL_JUMPIFNULL) == 0);
+		cmp_res = !(lclass == MP_CLASS_NIL && rclass == MP_CLASS_NIL);
+	} else if (lclass == rclass) {
+		cmp_res = sqlMemCompare(pIn3, pIn1, pOp->p4.pColl);
 	} else {
-		enum field_type type = pOp->p5 & FIELD_TYPE_MASK;
-		if (sql_type_is_numeric(type)) {
-			if ((flags1 | flags3)&MEM_Str) {
-				if ((flags1 & MEM_Str) == MEM_Str) {
-					mem_apply_numeric_type(pIn1);
-					testcase( flags3!=pIn3->flags); /* Possible if pIn1==pIn3 */
-					flags3 = pIn3->flags;
-				}
-				if ((flags3 & MEM_Str) == MEM_Str) {
-					if (mem_apply_numeric_type(pIn3) != 0) {
-						diag_set(ClientError,
-							 ER_SQL_TYPE_MISMATCH,
-							 sql_value_to_diag_str(pIn3),
-							 "numeric");
-						goto abort_due_to_error;
-					}
-
-				}
-			}
-			/* Handle the common case of integer comparison here, as an
-			 * optimization, to avoid a call to sqlMemCompare()
-			 */
-			if ((pIn1->flags & pIn3->flags & (MEM_Int | MEM_UInt)) != 0) {
-				if ((pIn1->flags & pIn3->flags & MEM_Int) != 0) {
-					if (pIn3->u.i > pIn1->u.i)
-						res = +1;
-					else if (pIn3->u.i < pIn1->u.i)
-						res = -1;
-					else
-						res = 0;
-					goto compare_op;
-				}
-				if ((pIn1->flags & pIn3->flags & MEM_UInt) != 0) {
-					if (pIn3->u.u > pIn1->u.u)
-						res = +1;
-					else if (pIn3->u.u < pIn1->u.u)
-						res = -1;
-					else
-						res = 0;
-					goto compare_op;
-				}
-				if ((pIn1->flags & MEM_UInt) != 0 &&
-				    (pIn3->flags & MEM_Int) != 0) {
-					res = -1;
-					goto compare_op;
-				}
-				res = 1;
-				goto compare_op;
-			}
-		} else if (type == FIELD_TYPE_STRING) {
-			if ((flags1 & MEM_Str) == 0 &&
-			    (flags1 & (MEM_Int | MEM_UInt | MEM_Real)) != 0) {
-				testcase( pIn1->flags & MEM_Int);
-				testcase( pIn1->flags & MEM_Real);
-				sqlVdbeMemStringify(pIn1);
-				testcase( (flags1&MEM_Dyn) != (pIn1->flags&MEM_Dyn));
-				flags1 = (pIn1->flags & ~MEM_TypeMask) | (flags1 & MEM_TypeMask);
-				assert(pIn1!=pIn3);
-			}
-			if ((flags3 & MEM_Str) == 0 &&
-			    (flags3 & (MEM_Int | MEM_UInt | MEM_Real)) != 0) {
-				testcase( pIn3->flags & MEM_Int);
-				testcase( pIn3->flags & MEM_Real);
-				sqlVdbeMemStringify(pIn3);
-				testcase( (flags3&MEM_Dyn) != (pIn3->flags&MEM_Dyn));
-				flags3 = (pIn3->flags & ~MEM_TypeMask) | (flags3 & MEM_TypeMask);
-			}
-		}
-		assert(pOp->p4type==P4_COLLSEQ || pOp->p4.pColl==0);
-		res = sqlMemCompare(pIn3, pIn1, pOp->p4.pColl);
-	}
-			compare_op:
-	switch( pOp->opcode) {
-	case OP_Eq:    res2 = res==0;     break;
-	case OP_Ne:    res2 = res;        break;
-	case OP_Lt:    res2 = res<0;      break;
-	case OP_Le:    res2 = res<=0;     break;
-	case OP_Gt:    res2 = res>0;      break;
-	default:       res2 = res>=0;     break;
+		diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
+			 mem_type_to_str(pIn1), mem_type_to_str(pIn3));
+		goto abort_due_to_error;
 	}
 
-	/* Undo any changes made by mem_apply_type() to the input registers. */
-	assert((pIn1->flags & MEM_Dyn) == (flags1 & MEM_Dyn));
-	pIn1->flags = flags1;
-	pIn1->field_type = ft_p1;
-	assert((pIn3->flags & MEM_Dyn) == (flags3 & MEM_Dyn));
-	pIn3->flags = flags3;
-	pIn3->field_type = ft_p3;
+	switch (pOp->opcode) {
+	case OP_Eq:
+		result = cmp_res == 0;
+		break;
+	case OP_Ne:
+		result = cmp_res != 0;
+		break;
+	case OP_Lt:
+		result = cmp_res < 0;
+		break;
+	case OP_Le:
+		result = cmp_res <= 0;
+		break;
+	case OP_Gt:
+		result = cmp_res > 0;
+		break;
+	case OP_Ge:
+		result = cmp_res >= 0;
+		break;
+	default:
+		unreachable();
+	}
 
 	if (pOp->p5 & SQL_STOREP2) {
-		iCompare = res;
-		res2 = res2!=0;  /* For this path res2 must be exactly 0 or 1 */
-		if ((pOp->p5 & SQL_KEEPNULL)!=0) {
-			/* The KEEPNULL flag prevents OP_Eq from overwriting a NULL with true
-			 * and prevents OP_Ne from overwriting NULL with false.  This flag
-			 * is only used in contexts where either:
-			 *   (1) op==OP_Eq && (r[P2]==NULL || r[P2]==0)
-			 *   (2) op==OP_Ne && (r[P2]==NULL || r[P2]==1)
-			 * Therefore it is not necessary to check the content of r[P2] for
-			 * NULL.
-			 */
-			assert(pOp->opcode==OP_Ne || pOp->opcode==OP_Eq);
-			assert(res2==0 || res2==1);
-			testcase( res2==0 && pOp->opcode==OP_Eq);
-			testcase( res2==1 && pOp->opcode==OP_Eq);
-			testcase( res2==0 && pOp->opcode==OP_Ne);
-			testcase( res2==1 && pOp->opcode==OP_Ne);
-			if ((pOp->opcode==OP_Eq)==res2) break;
+		iCompare = cmp_res;
+		/*
+		 * The KEEPNULL flag prevents OP_Eq from
+		 * overwriting a NULL with true and prevents OP_Ne
+		 * from overwriting NULL with false. This flag
+		 * is only used in contexts where either:
+		 *   (1) op==OP_Eq && (r[P2]==NULL || r[P2]==0)
+		 *   (2) op==OP_Ne && (r[P2]==NULL || r[P2]==1)
+		 * Therefore it is not necessary to check the
+		 * content of r[P2] for NULL.
+		 */
+		if ((pOp->p5 & SQL_KEEPNULL) != 0) {
+			assert(pOp->opcode == OP_Ne || pOp->opcode == OP_Eq);
+			if ((pOp->opcode == OP_Eq) == result)
+				break;
 		}
 		pOut = vdbe_prepare_null_out(p, pOp->p2);
-		mem_set_bool(pOut, res2);
+		mem_set_bool(pOut, result);
 		REGISTER_TRACE(p, pOp->p2, pOut);
 	} else {
-		VdbeBranchTaken(res!=0, (pOp->p5 & SQL_NULLEQ)?2:3);
-		if (res2) {
+		VdbeBranchTaken(cmp_res != 0, (pOp->p5 & SQL_NULLEQ) ? 2 : 3);
+		if (result)
 			goto jump_to_p2;
-		}
 	}
 	break;
 }
