@@ -401,7 +401,7 @@ replicaset_add_anon(const struct tt_uuid *replica_uuid);
  */
 void
 replicaset_connect(struct applier **appliers, int count,
-		   bool connect_quorum);
+		   bool connect_quorumm, int new_count);
 
 /**
  * Check if the current instance fell too much behind its

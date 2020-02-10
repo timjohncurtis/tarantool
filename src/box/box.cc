@@ -139,6 +139,8 @@ static struct fiber_pool tx_fiber_pool;
  */
 static struct cbus_endpoint tx_prio_endpoint;
 
+char *remove_sources[VCLOCK_MAX-1];
+
 static int
 box_check_writable(void)
 {
@@ -667,10 +669,40 @@ box_check_config()
 }
 
 /*
+ * Check if the new source from cfg is in replicaset sources.
+ * true if is in replicaset sources
+ * false otherwise.
+ * */
+static bool source_exist(const char *source)
+{
+	replicaset_foreach(replica) {
+		if (replica->applier != NULL) {
+			if (strcmp(replica->applier->source, source) == 0)
+				return true;
+		}
+	}
+	return false;
+}
+
+/* Check whether replicaset source is in new configuration.
+ * true if source in replicaset and in the config
+ * false otherwise.
+ * */
+ static bool source_left(int count, const char *source_old)
+{
+	for (int i = 0; i < count; i++) {
+		const char *source_new = cfg_getarr_elem("replication", i);
+		if(strcmp(source_new, source_old) == 0)
+			return true;
+	}
+	return false;
+}
+
+/*
  * Parse box.cfg.replication and create appliers.
  */
 static struct applier **
-cfg_get_replication(int *p_count)
+cfg_get_replication(int *p_count, int *new_count)
 {
 
 	/* Use static buffer for result */
@@ -681,21 +713,51 @@ cfg_get_replication(int *p_count)
 		tnt_raise(ClientError, ER_CFG, "replication",
 				"too many replicas");
 	}
-
-	for (int i = 0; i < count; i++) {
-		const char *source = cfg_getarr_elem("replication", i);
-		struct applier *applier = applier_new(source);
-		if (applier == NULL) {
+	if (box_check_replication_anon() != replication_anon) {
+		int j = 0;
+		for (int i = 0; i < count; i++) {
+			const char *source = cfg_getarr_elem("replication", i);
+			struct applier *applier = applier_new(source);
+			if (applier == NULL) {
 			/* Delete created appliers */
-			while (--i >= 0)
-				applier_delete(appliers[i]);
-			return NULL;
+				while (--j >= 0)
+					applier_delete(appliers[j]);
+				return NULL;
+			}
+			appliers[i] = applier; /* link to the list */
+			remove_sources[i] = strdup(source);
 		}
-		appliers[i] = applier; /* link to the list */
+		*p_count = count;
+		*new_count = count;
+	} else {
+		int j = 0;
+		/* Create appliers only for new sources */
+		for (int i = 0; i < count; i++) {
+			const char *source = cfg_getarr_elem("replication", i);
+				if (!source_exist(source)) {
+					struct applier *applier = applier_new(source);
+				if (applier == NULL) {
+				/* Delete created appliers */
+					while (--j >= 0)
+						applier_delete(appliers[j]);
+					return NULL;
+				}
+				appliers[j] = applier; /* link to the list */
+				j++;
+			}
+		}
+		int i = 0;
+	/* List of appliers to be deleted*/
+		replicaset_foreach(replica) {
+			if (replica->applier != NULL && !source_left(count, replica->applier->source)) {
+				remove_sources[i] = strdup(replica->applier->source);
+				i++;
+		}
+	}	
+		/* Return only number on newly created appliers.*/
+		*p_count = count;
+		*new_count = j;
 	}
-
-	*p_count = count;
-
 	return appliers;
 }
 
@@ -707,17 +769,19 @@ static void
 box_sync_replication(bool connect_quorum)
 {
 	int count = 0;
-	struct applier **appliers = cfg_get_replication(&count);
+	/*Create only non-existing appliers*/
+	int new_count = 0;
+	struct applier **appliers = cfg_get_replication(&count, &new_count);
+
 	if (appliers == NULL)
 		diag_raise();
 
 	auto guard = make_scoped_guard([=]{
-		for (int i = 0; i < count; i++)
+		for (int i = 0; i < new_count; i++)
 			applier_delete(appliers[i]); /* doesn't affect diag */
 	});
 
-	replicaset_connect(appliers, count, connect_quorum);
-
+	replicaset_connect(appliers, count, connect_quorum, new_count);
 	guard.is_active = false;
 }
 
@@ -731,6 +795,11 @@ box_set_replication(void)
 		 * hot standby mode is finished, see box_cfg().
 		 */
 		return;
+	}
+
+	replicaset_foreach(replica) {
+		if (replica->applier == NULL)
+			continue;
 	}
 
 	box_check_replication();
@@ -796,7 +865,6 @@ box_set_replication_anon(void)
 			replication_anon = !anon;
 		});
 		/* Turn anonymous instance into a normal one. */
-		replication_anon = anon;
 		/*
 		 * Reset all appliers. This will interrupt
 		 * anonymous follow they're in so that one of
@@ -804,6 +872,8 @@ box_set_replication_anon(void)
 		 * non-anonymous subscribe.
 		 */
 		box_sync_replication(false);
+		/* Turn anonymous instance into a normal one. */
+		replication_anon = anon;
 		/*
 		 * Wait until the master has registered this
 		 * instance.
