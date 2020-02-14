@@ -42,6 +42,7 @@ memory_init()
 	quota_init(&runtime_quota, QUOTA_MAX);
 
 	/* No limit on the runtime memory. */
+	runtime.trunc_alloc = 0;
 	slab_arena_create(&runtime, &runtime_quota, 0,
 			  SLAB_SIZE, SLAB_ARENA_PRIVATE);
 }

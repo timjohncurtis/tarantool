@@ -342,6 +342,10 @@ tuple_arena_create(struct slab_arena *arena, struct quota *quota,
 	say_info("mapping %zu bytes for %s tuple arena...", prealloc,
 		 arena_name);
 
+	if (!strncmp(arena_name, "memtx", 5))
+		arena->trunc_alloc = slab_size;
+	else
+		arena->trunc_alloc = 0;
 	if (slab_arena_create(arena, quota, prealloc, slab_size, flags) != 0) {
 		if (errno == ENOMEM) {
 			panic("failed to preallocate %zu bytes: Cannot "\
