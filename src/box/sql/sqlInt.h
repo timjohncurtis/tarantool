@@ -4114,6 +4114,12 @@ struct sql_key_info {
 	struct key_def *key_def;
 	/** Reference counter. */
 	uint32_t refs;
+	/**
+	 * Rowid should be the first part of PK, if true. If this
+	 * flag is false, rowid may be any part of the index or
+	 * may be absent.
+	 */
+	bool is_rowid_first;
 	/** Number of parts in the key. */
 	uint32_t part_count;
 	/** Definition of the key parts. */

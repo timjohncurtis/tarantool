@@ -2702,8 +2702,35 @@ case OP_Column: {
 		 * key parts.
 		 */
 		if (pC->uc.pCursor->curFlags & BTCF_TEphemCursor) {
-			field_type = pC->uc.pCursor->index->def->
-					key_def->parts[p2].type;
+			struct key_def *key_def =
+				pC->uc.pCursor->index->def->key_def;
+			/*
+			 * There are three options:
+			 * |Rowid|First field|...|Last field|
+			 * Or:
+			 * |First field|...|Last field|
+			 * Or:
+			 * |First field|...|Last field|Rowid|
+			 *
+			 * If ephemeral space has a rowid column,
+			 * it is always the last column. Due to
+			 * this, the field number of the rowid
+			 * column cannot be 0. So, if the first
+			 * part of the index have something other
+			 * than 0 as a fieldno, we know that this
+			 * is fieldno of rowid, since in all other
+			 * cases fieldno of the first part is 0.
+			 *
+			 * If rowid is the first part of the
+			 * index, we know that all the other parts
+			 * are columns sorted in the required
+			 * order. So, we should increment partno
+			 * by 1.
+			 */
+			uint32_t partno = p2;
+			if (key_def->parts[0].fieldno != 0)
+				++partno;
+			field_type = key_def->parts[partno].type;
 		} else if (pC->uc.pCursor->curFlags & BTCF_TaCursor) {
 			field_type = pC->uc.pCursor->space->def->
 					fields[p2].type;
