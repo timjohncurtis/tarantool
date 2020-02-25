@@ -81,6 +81,9 @@ port_tuple_create(struct port *port);
 int
 port_tuple_add(struct port *port, struct tuple *tuple);
 
+int
+port_tuple_add_head(struct port *base, struct tuple *tuple);
+
 /** Port implementation used for storing raw data. */
 struct port_msgpack {
 	const struct port_vtab *vtab;

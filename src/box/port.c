@@ -64,6 +64,31 @@ port_tuple_add(struct port *base, struct tuple *tuple)
 	return 0;
 }
 
+int
+port_tuple_add_head(struct port *base, struct tuple *tuple)
+{
+	struct port_tuple *port = port_tuple(base);
+	struct port_tuple_entry *e;
+	if (port->size == 0) {
+		tuple_ref(tuple);
+		e = &port->first_entry;
+		e->next = NULL;
+		port->first = port->last = e;
+	} else {
+		e = mempool_alloc(&port_tuple_entry_pool);
+		if (e == NULL) {
+			diag_set(OutOfMemory, sizeof(*e), "mempool_alloc", "e");
+			return -1;
+		}
+		tuple_ref(tuple);
+		e->next = port->first;
+		port->first = e;
+	}
+	e->tuple = tuple;
+	++port->size;
+	return 0;
+}
+
 void
 port_tuple_create(struct port *base)
 {
@@ -82,6 +107,19 @@ port_tuple_destroy(struct port *base)
 	if (e == NULL)
 		return;
 	tuple_unref(e->tuple);
+	/*
+	 * If numer of tupes more than one and first_entry.next is
+	 * NULL, than tupes were added to head of the list.
+	 */
+	if (port->size > 1 && port->first_entry.next == NULL) {
+		while (e->next != NULL) {
+			struct port_tuple_entry *cur = e;
+			e = e->next;
+			tuple_unref(e->tuple);
+			mempool_free(&port_tuple_entry_pool, cur);
+		}
+		return;
+	}
 	e = e->next;
 	while (e != NULL) {
 		struct port_tuple_entry *cur = e;
