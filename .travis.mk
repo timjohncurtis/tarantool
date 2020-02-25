@@ -130,10 +130,11 @@ test_asan_debian: deps_debian deps_buster_clang_8 test_asan_debian_no_deps
 deps_osx:
 	brew update
 	brew install openssl readline curl icu4c libiconv zlib autoconf automake libtool --force
-	python2 -V || brew install python2 --force
-	curl --silent --show-error --retry 5 https://bootstrap.pypa.io/get-pip.py >get-pip.py
-	python get-pip.py --user
-	pip install --user --force-reinstall -r test-run/requirements.txt
+	export PATH=/System/Library/Frameworks/Python.framework/Versions/2.7/bin:$PATH ; \
+		python2 -V || brew install python2 --force \
+		curl --silent --show-error --retry 5 https://bootstrap.pypa.io/get-pip.py >get-pip.py \
+		python get-pip.py --user \
+		pip install --user --force-reinstall -r test-run/requirements.txt
 
 build_osx:
 	cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo -DENABLE_WERROR=ON ${CMAKE_EXTRA_PARAMS}
@@ -152,6 +153,7 @@ test_osx_no_deps: build_osx
 		launchctl limit maxfiles || : ; \
 		ulimit -n ${MAX_FILES} || : ; \
 		ulimit -n ; \
+		export PATH=/System/Library/Frameworks/Python.framework/Versions/2.7/bin:$PATH ; \
 		cd test && ./test-run.py --force $(TEST_RUN_EXTRA_PARAMS) \
 			app/ app-tap/ box/ box-py/ box-tap/ engine/ engine_long/ long_run-py/ luajit-tap/ \
 			replication-py/ small/ sql/ sql-tap/ swim/ unit/ vinyl/ wal_off/ xlog/ xlog-py/
