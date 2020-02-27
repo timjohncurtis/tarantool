@@ -101,5 +101,5 @@ release:
   tags:
     - osx_14
   script:
-    - ${GITLAB_MAKE} test_osx
+    - rm -rf /tmp/tnt ; ln -s ${PWD} /tmp/tnt ; cd /tmp/tnt && ${GITLAB_MAKE} test_osx
 
