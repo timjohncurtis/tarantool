@@ -148,17 +148,8 @@ applier_writer_f(va_list ap)
 	coio_create(&io, applier->io.fd);
 
 	while (!fiber_is_cancelled()) {
-		/*
-		 * Tarantool >= 1.7.7 sends periodic heartbeat
-		 * messages so we don't need to send ACKs every
-		 * replication_timeout seconds any more.
-		 */
-		if (applier->version_id >= version_id(1, 7, 7))
-			fiber_cond_wait_timeout(&applier->writer_cond,
-						TIMEOUT_INFINITY);
-		else
-			fiber_cond_wait_timeout(&applier->writer_cond,
-						replication_timeout);
+		fiber_cond_wait_timeout(&applier->writer_cond,
+					TIMEOUT_INFINITY);
 		/*
 		 * A writer fiber is going to be awaken after a commit or
 		 * a heartbeat message. So this is an appropriate place to
@@ -335,6 +326,11 @@ applier_connect(struct applier *applier)
 			 version_id_patch(greeting.version_id));
 	}
 
+	if (greeting.version_id < version_id(1, 7, 7))
+		tnt_raise(LoggedError, ER_UNSUPPORTED, "Replication",
+			  "Pre 1.7.7 masters");
+
+
 	/* Save the remote instance version and UUID on connect. */
 	applier->uuid = greeting.uuid;
 	applier->version_id = greeting.version_id;
@@ -400,28 +396,22 @@ applier_wait_snapshot(struct applier *applier)
 	struct ibuf *ibuf = &applier->ibuf;
 	struct xrow_header row;
 
-	/**
-	 * Tarantool < 1.7.0: if JOIN is successful, there is no "OK"
-	 * response, but a stream of rows from checkpoint.
-	 */
-	if (applier->version_id >= version_id(1, 7, 0)) {
-		/* Decode JOIN/FETCH_SNAPSHOT response */
-		if (coio_read_xrow(coio, ibuf, &row) < 0)
-			diag_raise();
-		if (iproto_type_is_error(row.type)) {
-			xrow_decode_error_xc(&row); /* re-throw error */
-		} else if (row.type != IPROTO_OK) {
-			tnt_raise(ClientError, ER_UNKNOWN_REQUEST_TYPE,
-				  (uint32_t) row.type);
-		}
-		/*
-		 * Start vclock. The vclock of the checkpoint
-		 * the master is sending to the replica.
-		 * Used to initialize the replica's initial
-		 * vclock in bootstrap_from_master()
-		 */
-		xrow_decode_vclock_xc(&row, &replicaset.vclock);
+	/* Decode JOIN/FETCH_SNAPSHOT response */
+	if (coio_read_xrow(coio, ibuf, &row) < 0)
+		diag_raise();
+	if (iproto_type_is_error(row.type)) {
+		xrow_decode_error_xc(&row); /* re-throw error */
+	} else if (row.type != IPROTO_OK) {
+		tnt_raise(ClientError, ER_UNKNOWN_REQUEST_TYPE,
+			  (uint32_t) row.type);
 	}
+	/*
+	 * Start vclock. The vclock of the checkpoint
+	 * the master is sending to the replica.
+	 * Used to initialize the replica's initial
+	 * vclock in bootstrap_from_master()
+	 */
+	xrow_decode_vclock_xc(&row, &replicaset.vclock);
 
 	/*
 	 * Receive initial data.
@@ -437,16 +427,6 @@ applier_wait_snapshot(struct applier *applier)
 			if (++row_count % 100000 == 0)
 				say_info("%.1fM rows received", row_count / 1e6);
 		} else if (row.type == IPROTO_OK) {
-			if (applier->version_id < version_id(1, 7, 0)) {
-				/*
-				 * This is the start vclock if the
-				 * server is 1.6. Since we have
-				 * not initialized replication
-				 * vclock yet, do it now. In 1.7+
-				 * this vclock is not used.
-				 */
-				xrow_decode_vclock_xc(&row, &replicaset.vclock);
-			}
 			break; /* end of stream */
 		} else if (iproto_type_is_error(row.type)) {
 			xrow_decode_error_xc(&row);  /* rethrow error */
@@ -482,14 +462,6 @@ applier_wait_register(struct applier *applier, uint64_t row_count)
 	struct ev_io *coio = &applier->io;
 	struct ibuf *ibuf = &applier->ibuf;
 	struct xrow_header row;
-
-	/*
-	 * Tarantool < 1.7.0: there is no "final join" stage.
-	 * Proceed to "subscribe" and do not finish bootstrap
-	 * until replica id is received.
-	 */
-	if (applier->version_id < version_id(1, 7, 0))
-		return row_count;
 
 	/*
 	 * Receive final data.
@@ -607,19 +579,8 @@ applier_read_tx_row(struct applier *applier)
 	struct xrow_header *row = &tx_row->row;
 
 	double timeout = replication_disconnect_timeout();
-	/*
-	 * Tarantool < 1.7.7 does not send periodic heartbeat
-	 * messages so we can't assume that if we haven't heard
-	 * from the master for quite a while the connection is
-	 * broken - the master might just be idle.
-	 */
-	if (applier->version_id < version_id(1, 7, 7)) {
-		if (coio_read_xrow(coio, ibuf, row) < 0)
+	if (coio_read_xrow_timeout(coio, ibuf, row, timeout) < 0)
 			diag_raise();
-	} else {
-		if (coio_read_xrow_timeout(coio, ibuf, row, timeout) < 0)
-			diag_raise();
-	}
 
 	applier->lag = ev_now(loop()) - row->tm;
 	applier->last_row_time = ev_monotonic_now(loop());
@@ -883,86 +844,57 @@ applier_subscribe(struct applier *applier)
 		diag_raise();
 
 	/* Read SUBSCRIBE response */
-	if (applier->version_id >= version_id(1, 6, 7)) {
-		if (coio_read_xrow(coio, ibuf, &row) < 0)
-			diag_raise();
-		if (iproto_type_is_error(row.type)) {
-			xrow_decode_error_xc(&row);  /* error */
-		} else if (row.type != IPROTO_OK) {
-			tnt_raise(ClientError, ER_PROTOCOL,
-				  "Invalid response to SUBSCRIBE");
-		}
-		/*
-		 * In case of successful subscribe, the server
-		 * responds with its current vclock.
-		 *
-		 * Tarantool > 2.1.1 also sends its cluster id to
-		 * the replica, and replica has to check whether
-		 * its and master's cluster ids match.
-		 */
-		vclock_create(&applier->remote_vclock_at_subscribe);
-		xrow_decode_subscribe_response_xc(&row, &cluster_id,
-					&applier->remote_vclock_at_subscribe);
-		/*
-		 * If master didn't send us its cluster id
-		 * assume that it has done all the checks.
-		 * In this case cluster_id will remain zero.
-		 */
-		if (!tt_uuid_is_nil(&cluster_id) &&
-		    !tt_uuid_is_equal(&cluster_id, &REPLICASET_UUID)) {
-			tnt_raise(ClientError, ER_REPLICASET_UUID_MISMATCH,
-				  tt_uuid_str(&cluster_id),
-				  tt_uuid_str(&REPLICASET_UUID));
-		}
-
-		say_info("subscribed");
-		say_info("remote vclock %s local vclock %s",
-			 vclock_to_string(&applier->remote_vclock_at_subscribe),
-			 vclock_to_string(&vclock));
+	if (coio_read_xrow(coio, ibuf, &row) < 0)
+		diag_raise();
+	if (iproto_type_is_error(row.type)) {
+		xrow_decode_error_xc(&row);  /* error */
+	} else if (row.type != IPROTO_OK) {
+		tnt_raise(ClientError, ER_PROTOCOL,
+			  "Invalid response to SUBSCRIBE");
 	}
 	/*
-	 * Tarantool < 1.6.7:
-	 * If there is an error in subscribe, it's sent directly
-	 * in response to subscribe.  If subscribe is successful,
-	 * there is no "OK" response, but a stream of rows from
-	 * the binary log.
+	 * In case of successful subscribe, the server
+	 * responds with its current vclock.
+	 *
+	 * Tarantool > 2.1.1 also sends its cluster id to
+	 * the replica, and replica has to check whether
+	 * its and master's cluster ids match.
 	 */
-
-	if (applier->state == APPLIER_READY) {
-		/*
-		 * Tarantool < 1.7.7 does not send periodic heartbeat
-		 * messages so we cannot enable applier synchronization
-		 * for it without risking getting stuck in the 'orphan'
-		 * mode until a DML operation happens on the master.
-		 */
-		if (applier->version_id >= version_id(1, 7, 7))
-			applier_set_state(applier, APPLIER_SYNC);
-		else
-			applier_set_state(applier, APPLIER_FOLLOW);
-	} else {
-		/*
-		 * Tarantool < 1.7.0 sends replica id during
-		 * "subscribe" stage. We can't finish bootstrap
-		 * until it is received.
-		 */
-		assert(applier->state == APPLIER_FINAL_JOIN);
-		assert(applier->version_id < version_id(1, 7, 0));
+	vclock_create(&applier->remote_vclock_at_subscribe);
+	xrow_decode_subscribe_response_xc(&row, &cluster_id,
+					  &applier->remote_vclock_at_subscribe);
+	/*
+	 * If master didn't send us its cluster id
+	 * assume that it has done all the checks.
+	 * In this case cluster_id will remain zero.
+	 */
+	if (!tt_uuid_is_nil(&cluster_id) &&
+	    !tt_uuid_is_equal(&cluster_id, &REPLICASET_UUID)) {
+		tnt_raise(ClientError, ER_REPLICASET_UUID_MISMATCH,
+			  tt_uuid_str(&cluster_id),
+			  tt_uuid_str(&REPLICASET_UUID));
 	}
+
+	say_info("subscribed");
+	say_info("remote vclock %s local vclock %s",
+		 vclock_to_string(&applier->remote_vclock_at_subscribe),
+		 vclock_to_string(&vclock));
+
+	assert(applier->state == APPLIER_READY);
+		applier_set_state(applier, APPLIER_SYNC);
 
 	/* Re-enable warnings after successful execution of SUBSCRIBE */
 	applier->last_logged_errcode = 0;
-	if (applier->version_id >= version_id(1, 7, 4)) {
-		/* Enable replication ACKs for newer servers */
-		assert(applier->writer == NULL);
+	/* Enable replication ACKs for newer servers */
+	assert(applier->writer == NULL);
 
-		char name[FIBER_NAME_MAX];
-		int pos = snprintf(name, sizeof(name), "applierw/");
-		uri_format(name + pos, sizeof(name) - pos, &applier->uri, false);
+	char name[FIBER_NAME_MAX];
+	int pos = snprintf(name, sizeof(name), "applierw/");
+	uri_format(name + pos, sizeof(name) - pos, &applier->uri, false);
 
-		applier->writer = fiber_new_xc(name, applier_writer_f);
-		fiber_set_joinable(applier->writer, true);
-		fiber_start(applier->writer, applier);
-	}
+	applier->writer = fiber_new_xc(name, applier_writer_f);
+	fiber_set_joinable(applier->writer, true);
+	fiber_start(applier->writer, applier);
 
 	applier->lag = TIMEOUT_INFINITY;
 
