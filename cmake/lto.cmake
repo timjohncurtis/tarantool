@@ -78,7 +78,8 @@ if (NOT TARGET_OS_DARWIN)
         if (linker_version VERSION_LESS "2.31")
             message(FATAL_ERROR "ld.bfd >= 2.31 is needed for LTO")
         endif()
-    elseif(matched_gold)
+
+	elseif(matched_gold)
         set(linker_version ${CMAKE_MATCH_1})
         message(STATUS "Found ld.gold version: ${linker_version}")
 
