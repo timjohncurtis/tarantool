@@ -9,6 +9,7 @@ local errno    = require('errno')
 local urilib   = require('uri')
 local internal = require('net.box.lib')
 local trigger  = require('internal.trigger')
+local debug    = require('debug')
 
 local band              = bit.band
 local max               = math.max
@@ -62,6 +63,14 @@ local is_final_state         = {closed = 1, error = 1}
 -- negotiations keys
 local neg_keys = {
     ERROR_FORMAT_VERSION = 0
+}
+
+-- error details
+local error_details = {
+    REASON = 0,
+    CODE = 1,
+    BACKTRACE = 2,
+    CUSTOM_TYPE = 3
 }
 
 local function decode_nil(raw_data, raw_data_end)
@@ -291,7 +300,32 @@ local function create_transport(host, port, user, password, callback,
     -- @retval nil, error Error occured.
     --
     function request_index:result()
-        if self.errno then
+        local function parse_extended_error(error_ex)
+            local reason      = error_ex[error_details.REASON]
+            local code        = error_ex[error_details.CODE]
+            local r_bt        = error_ex[error_details.BACKTRACE]
+            local custom_type = error_ex[error_details.CUSTOM_TYPE]
+            local err         = box.error.new({code = code,
+                                               reason = reason,
+                                               custom_type = custom_type})
+            local cur_bt      = debug.traceback()
+            local result_bt   = string.format("Remote(%s:%s):"
+                                              .."\n%s\nEnd Remote\n%s",
+                                              host, tostring(port),
+                                              r_bt, cur_bt)
+            box.error.set_lua_bt(err, result_bt)
+            return err
+        end
+
+        if self.errno and type(self.response) == 'table' then
+            local response = self.response[1]
+            if not response then
+                return nil, box.error.new(box.error.PROC_LUA,
+                                          'Can\'t parse a remote error')
+            end
+            local err = parse_extended_error(response)
+            return nil, err
+        elseif self.errno then
             return nil, box.error.new({code = self.errno,
                                        reason = self.response})
         elseif not self.id then

@@ -471,6 +471,20 @@ vy_row_index_key_name(enum vy_row_index_key key)
 }
 
 /**
+ * Error details keys
+ */
+enum error_details_key {
+	/** Reason */
+	ERROR_DET_REASON,
+	/** Error code */
+	ERROR_DET_CODE,
+	/** Backtrace */
+	ERROR_DET_BT,
+	/** Custom type */
+	ERROR_DET_CT
+};
+
+/**
  * Negotiation protocol's keys
  */
 enum neg_key {

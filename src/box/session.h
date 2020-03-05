@@ -87,7 +87,9 @@ enum error_formats {
 	/** Default(old) format */
 	ERR_FORMAT_DEF,
 	/** Extended format */
-	ERR_FORMAT_EX
+	ERR_FORMAT_EX,
+	/** The max version of error format */
+	ERR_FORMAT_UNK
 };
 
 /**

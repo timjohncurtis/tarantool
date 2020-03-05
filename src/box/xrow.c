@@ -385,6 +385,10 @@ static const struct iproto_body_bin iproto_error_bin = {
 	0x81, IPROTO_ERROR, 0xdb, 0
 };
 
+static const struct iproto_body_bin iproto_error_bin_ex = {
+	0x81, IPROTO_ERROR, 0xdd, 0
+};
+
 /** Return a 4-byte numeric error code, with status flags. */
 static inline uint32_t
 iproto_encode_error(uint32_t error)
@@ -532,6 +536,70 @@ iproto_reply_error(struct obuf *out, const struct error *e, uint64_t sync,
 	/* Malformed packet appears to be a lesser evil than abort. */
 	return obuf_dup(out, &body, sizeof(body)) != sizeof(body) ||
 	       obuf_dup(out, e->errmsg, msg_len) != msg_len ? -1 : 0;
+}
+
+int
+iproto_reply_error_ex(struct obuf *out, const struct error *e,
+		      uint64_t sync, uint32_t schema_version)
+{
+	uint32_t errcode = box_error_code(e);
+	const char *err_type = box_error_type(e);
+	const char *custom_type = NULL;
+
+	struct iproto_body_bin body = iproto_error_bin_ex;
+
+	uint32_t buf_size = IPROTO_HEADER_LEN + sizeof(body);
+	/* Reason and code are the necessary fields */
+	uint32_t details_num = 2;
+
+	buf_size += mp_sizeof_uint(ERROR_DET_CODE);
+	buf_size += mp_sizeof_uint(errcode);
+	buf_size += mp_sizeof_uint(ERROR_DET_REASON);
+	buf_size += mp_sizeof_str(strlen(e->errmsg));
+	if (strcmp(err_type, "CustomError") == 0) {
+		++details_num;
+		buf_size += mp_sizeof_uint(ERROR_DET_CT);
+		custom_type = box_custom_error_type(e);
+		buf_size += mp_sizeof_str(strlen(custom_type));
+	}
+	if (e->lua_bt) {
+		++details_num;
+		buf_size += mp_sizeof_uint(ERROR_DET_BT);
+		buf_size += mp_sizeof_str(strlen(e->lua_bt));
+	}
+	buf_size += mp_sizeof_map(details_num);
+
+	char *buf = (char *)obuf_alloc(out, buf_size);
+	if (buf == NULL) {
+		diag_set(OutOfMemory, buf_size, "obuf_alloc", "buf");
+		return -1;
+	}
+
+	char *data = buf;
+	iproto_header_encode(data, iproto_encode_error(errcode), sync,
+			     schema_version, buf_size - IPROTO_HEADER_LEN);
+	body.v_data_len = mp_bswap_u32(1);
+	data += IPROTO_HEADER_LEN;
+
+	memcpy(data, &body, sizeof(body));
+	data += sizeof(body);
+
+	data = mp_encode_map(data, details_num);
+	data = mp_encode_uint(data, ERROR_DET_CODE);
+	data = mp_encode_uint(data, errcode);
+	data = mp_encode_uint(data, ERROR_DET_REASON);
+	data = mp_encode_str(data, e->errmsg, strlen(e->errmsg));
+	if (custom_type) {
+		data = mp_encode_uint(data, ERROR_DET_CT);
+		data = mp_encode_str(data, custom_type, strlen(custom_type));
+	}
+	if(e->lua_bt) {
+		data = mp_encode_uint(data, ERROR_DET_BT);
+		data = mp_encode_str(data, e->lua_bt, strlen(e->lua_bt));
+	}
+	assert(data == buf + buf_size);
+
+	return 0;
 }
 
 void
@@ -1591,6 +1659,11 @@ error:
 			if (mp_typeof(*data) != MP_UINT)
 				goto error;
 			request->err_format_ver = mp_decode_uint(&data);
+			if (request->err_format_ver >= ERR_FORMAT_UNK) {
+				diag_set(ClientError, ER_ILLEGAL_PARAMS,
+					 "unknown version of error format");
+				return -1;
+			}
 			break;
 		default:
 			/* unknown key */

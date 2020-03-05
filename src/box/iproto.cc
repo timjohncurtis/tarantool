@@ -1506,9 +1506,15 @@ tx_accept_msg(struct cmsg *m)
 static void
 tx_reply_error(struct iproto_msg *msg)
 {
+	struct session *ses = msg->connection->session;
 	struct obuf *out = msg->connection->tx.p_obuf;
-	iproto_reply_error(out, diag_last_error(&fiber()->diag),
-			   msg->header.sync, ::schema_version);
+	if (ses->neg_param.err_format_ver == ERR_FORMAT_EX) {
+		iproto_reply_error_ex(out, diag_last_error(&fiber()->diag),
+				      msg->header.sync, ::schema_version);
+	} else {
+		iproto_reply_error(out, diag_last_error(&fiber()->diag),
+				   msg->header.sync, ::schema_version);
+	}
 	iproto_wpos_create(&msg->wpos, out);
 }
 
@@ -1520,9 +1526,15 @@ static void
 tx_reply_iproto_error(struct cmsg *m)
 {
 	struct iproto_msg *msg = tx_accept_msg(m);
+	struct session *ses = msg->connection->session;
 	struct obuf *out = msg->connection->tx.p_obuf;
-	iproto_reply_error(out, diag_last_error(&msg->diag),
-			   msg->header.sync, ::schema_version);
+	if (ses->neg_param.err_format_ver == ERR_FORMAT_EX) {
+		iproto_reply_error_ex(out, diag_last_error(&msg->diag),
+				      msg->header.sync, ::schema_version);
+	} else {
+		iproto_reply_error(out, diag_last_error(&msg->diag),
+				   msg->header.sync, ::schema_version);
+	}
 	iproto_wpos_create(&msg->wpos, out);
 }
 

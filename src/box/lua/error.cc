@@ -189,6 +189,23 @@ luaT_error_custom_type(lua_State *L)
 }
 
 static int
+luaT_error_set_lua_bt(lua_State *L)
+{
+	if (lua_gettop(L) < 2)
+		return luaL_error(L, "Usage: box.error.set_lua_bt(error, bt)");
+
+	struct error *e = luaL_checkerror(L, 1);
+
+	if (lua_type(L, 2) == LUA_TSTRING) {
+		error_set_lua_bt(e, lua_tostring(L, 2));
+	} else {
+		return luaL_error(L, "Usage: box.error.set_lua_bt(error, bt)");
+	}
+
+	return 0;
+}
+
+static int
 luaT_error_clear(lua_State *L)
 {
 	if (lua_gettop(L) >= 1)
@@ -315,6 +332,10 @@ box_lua_error_init(struct lua_State *L) {
 		{
 			lua_pushcfunction(L, luaT_error_custom_type);
 			lua_setfield(L, -2, "custom_type");
+		}
+		{
+			lua_pushcfunction(L, luaT_error_set_lua_bt);
+			lua_setfield(L, -2, "set_lua_bt");
 		}
 		lua_setfield(L, -2, "__index");
 	}

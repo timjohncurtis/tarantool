@@ -571,12 +571,20 @@ iproto_reply_vote(struct obuf *out, const struct ballot *ballot,
 		  uint64_t sync, uint32_t schema_version);
 
 /**
- * Write an error packet int output buffer. Doesn't throw if out
+ * Write an error packet to output buffer. Doesn't throw if out
  * of memory
  */
 int
 iproto_reply_error(struct obuf *out, const struct error *e, uint64_t sync,
 		   uint32_t schema_version);
+
+/**
+ * Write an extended error packet to output buffer. Doesn't throw if out
+ * of memory
+ */
+int
+iproto_reply_error_ex(struct obuf *out, const struct error *e, uint64_t sync,
+		      uint32_t schema_version);
 
 /**
  * Write a negotiation reply packet to output buffer.
