@@ -2223,6 +2223,8 @@ struct Parse {
 	TriggerPrg *pTriggerPrg;	/* Linked list of coded triggers */
 	With *pWith;		/* Current WITH clause, or NULL */
 	With *pWithToFree;	/* Free this WITH object at the end of the parse */
+	/** Index of previous auto generated name */
+	uint32_t autoname_i;
 	/** Space triggers are being coded for. */
 	struct space *triggered_space;
 	/**
@@ -4512,5 +4514,18 @@ sql_add_autoincrement(struct Parse *parse_context, uint32_t fieldno);
 int
 sql_fieldno_by_name(struct Parse *parse_context, struct Expr *field_name,
 		    uint32_t *fieldno);
+
+/**
+ * Return a string of the form "_COLUMN_N", where N is @a number.
+ *
+ * We decided to name every auto generated column in output by
+ * this pattern (like PostgreSQL), because it is convenient than
+ * "_auto_name_" and naming with span like MariaDB do.
+ */
+static inline const char *
+sql_generate_column_name(uint32_t number)
+{
+	return tt_sprintf("COLUMN_%d", number);
+}
 
 #endif				/* sqlINT_H */

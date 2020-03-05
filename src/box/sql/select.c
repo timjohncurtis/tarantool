@@ -1850,14 +1850,14 @@ generate_column_metadata(struct Parse *pParse, struct SrcList *pTabList,
 			}
 		} else {
 			const char *z = NULL;
-			if (colname != NULL)
+			if (colname != NULL) {
 				z = colname;
-			else if (span != NULL)
-				z = span;
-			else
-				z = tt_sprintf("column%d", i + 1);
+			} else {
+				uint32_t idx = ++pParse->autoname_i;
+				z = sql_generate_column_name(idx);
+			}
 			vdbe_metadata_set_col_name(v, i, z);
-			if (is_full_meta && colname != NULL)
+			if (is_full_meta)
 				vdbe_metadata_set_col_span(v, i, span);
 		}
 	}
@@ -1946,14 +1946,13 @@ sqlColumnsFromExprList(Parse * parse, ExprList * expr_list,
 			} else if (pColExpr->op == TK_ID) {
 				assert(!ExprHasProperty(pColExpr, EP_IntValue));
 				zName = pColExpr->u.zToken;
-			} else {
-				/* Use the original text of the column expression as its name */
-				zName = expr_list->a[i].zSpan;
 			}
 		}
-		if (zName == NULL)
-			zName = "_auto_field_";
-		zName = sqlMPrintf(db, "%s", zName);
+		if (zName == NULL) {
+			uint32_t idx = ++parse->autoname_i;
+			zName = (char *) sql_generate_column_name(idx);
+		}
+		zName = sqlDbStrDup(db, zName);
 
 		/* Make sure the column name is unique.  If the name is not unique,
 		 * append an integer to the name so that it becomes unique.

@@ -47,7 +47,15 @@ execute("SELECT x, y FROM v;")
 
 execute([[UPDATE "_session_settings" SET "value" = false WHERE "name" = 'sql_full_metadata';]])
 
+-- gh-3962: Check auto generated names in different selects.
+execute("VALUES(1, 2, 3);")
+execute("SELECT * FROM (VALUES (1+1, 1+1));")
+execute("SELECT 1+1, 1+1;")
+execute("SELECT ?, ?, ?", {1, 2, 3})
 test_run:cmd("setopt delimiter ';'")
+execute([[SELECT * FROM (SELECT * FROM (VALUES(1, 2))),
+                        (SELECT * FROM (VALUES(1, 2)))]]);
+
 if remote then
     cn:close()
     box.schema.user.revoke('guest', 'read, write, execute', 'universe')
