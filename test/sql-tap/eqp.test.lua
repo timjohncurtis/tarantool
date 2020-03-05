@@ -230,7 +230,7 @@ test:do_eqp_test("2.3.2", "SELECT min(x) FROM t2", {
 test:do_eqp_test("2.3.3", "SELECT min(x), max(x) FROM t2", {
     {0, 0, 0, "SCAN TABLE T2 (~1048576 rows)"},
 })
-test:do_eqp_test("2.4.1", "SELECT * FROM t1 WHERE idt1=?", {
+test:do_eqp_test("2.4.1", "SELECT * FROM t1 WHERE idt1=1", {
     {0, 0, 0, "SEARCH TABLE T1 USING PRIMARY KEY (IDT1=?) (~1 row)"},
 })
 ---------------------------------------------------------------------------
@@ -789,10 +789,10 @@ test:do_eqp_test("8.1.3", "SELECT count(*) FROM t2", {
 test:do_eqp_test("8.2.1", "SELECT * FROM t1", {
     {0, 0, 0, "SCAN TABLE T1 (~1048576 rows)"},
 })
-test:do_eqp_test("8.2.2", "SELECT * FROM t1 WHERE b=?", {
-    {0, 0, 0, "SEARCH TABLE T1 USING PRIMARY KEY (B=?) (~10 rows)"},
+test:do_eqp_test("8.2.2", "SELECT * FROM t1 WHERE b=1", {
+    {0,0,0,"SEARCH TABLE T1 USING PRIMARY KEY (B=?) (~10 rows)"},
 })
-test:do_eqp_test("8.2.3", "SELECT * FROM t1 WHERE b=? AND c=?", {
+test:do_eqp_test("8.2.3", "SELECT * FROM t1 WHERE b=1 AND c=1", {
     {0, 0, 0, "SEARCH TABLE T1 USING PRIMARY KEY (B=? AND C=?) (~1 row)"},
 })
 test:do_eqp_test("8.2.4", "SELECT count(*) FROM t1", {

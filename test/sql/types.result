@@ -347,12 +347,12 @@ box.execute("INSERT INTO tboolean VALUES (TRUE);")
 box.execute("SELECT * FROM tboolean WHERE s1 = x'44';")
 ---
 - null
-- 'Type mismatch: can not convert varbinary to boolean'
+- 'Type mismatch: can not convert boolean to varbinary'
 ...
 box.execute("SELECT * FROM tboolean WHERE s1 = 'abc';")
 ---
 - null
-- 'Type mismatch: can not convert abc to boolean'
+- 'Type mismatch: can not convert text to boolean'
 ...
 box.execute("SELECT * FROM tboolean WHERE s1 = 1;")
 ---

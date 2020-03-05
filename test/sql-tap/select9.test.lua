@@ -496,7 +496,11 @@ test:do_test(
         ]]
     end, {
         -- <select9-5.1>
-        "~/SCAN TABLE/"
+        1,0,0,"SCAN TABLE T51 (~262144 rows)",
+        1,0,0,"USE TEMP B-TREE FOR ORDER BY",
+        2,0,0,"SCAN TABLE T52 (~262144 rows)",
+        2,0,0,"USE TEMP B-TREE FOR ORDER BY",
+        0,0,0,"COMPOUND SUBQUERIES 1 AND 2 (UNION ALL)"
         -- </select9-5.1>
     })
 
@@ -510,7 +514,11 @@ test:do_test(
         ]]
     end, {
         -- <select9-5.2>
-        "~/SCAN TABLE/"
+        1,0,0,"SCAN TABLE T51 (~262144 rows)",
+        1,0,0,"USE TEMP B-TREE FOR ORDER BY",
+        2,0,0,"SCAN TABLE T52 (~262144 rows)",
+        2,0,0,"USE TEMP B-TREE FOR ORDER BY",
+        0,0,0,"COMPOUND SUBQUERIES 1 AND 2 (UNION ALL)"
         -- </select9-5.2>
     })
 

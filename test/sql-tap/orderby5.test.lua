@@ -33,7 +33,7 @@ test:do_execsql_test(
         SELECT DISTINCT a, b, c FROM t1 WHERE a='0';
     ]], {
         -- <1.1>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.1>
     })
 
@@ -44,7 +44,7 @@ test:do_execsql_test(
         SELECT DISTINCT a, c, b FROM t1 WHERE a='0';
     ]], {
         -- <1.2.1>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.2.1>
     })
 
@@ -77,7 +77,7 @@ test:do_execsql_test(
         SELECT DISTINCT a COLLATE "unicode_ci", c, b FROM t1 WHERE a='xyz' COLLATE "unicode_ci";
     ]], {
         -- <1.2.4>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.2.4>
     })
 
@@ -88,7 +88,7 @@ test:do_execsql_test(
         SELECT DISTINCT b, a, c FROM t1 WHERE a='0';
     ]], {
         -- <1.3>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 USING COVERING INDEX T1BC (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.3>
     })
 
@@ -99,7 +99,7 @@ test:do_execsql_test(
         SELECT DISTINCT b, c, a FROM t1 WHERE a='0';
     ]], {
         -- <1.4>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 USING COVERING INDEX T1BC (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.4>
     })
 
@@ -110,7 +110,7 @@ test:do_execsql_test(
         SELECT DISTINCT c, a, b FROM t1 WHERE a='0';
     ]], {
         -- <1.5>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 USING COVERING INDEX T1BC (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.5>
     })
 
@@ -121,7 +121,7 @@ test:do_execsql_test(
         SELECT DISTINCT c, b, a FROM t1 WHERE a='0';
     ]], {
         -- <1.6>
-        "~/B-TREE/"
+        0,0,0,"SCAN TABLE T1 USING COVERING INDEX T1BC (~262144 rows)",0,0,0,"USE TEMP B-TREE FOR DISTINCT"
         -- </1.6>
     })
 

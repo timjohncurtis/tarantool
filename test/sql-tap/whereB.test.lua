@@ -623,7 +623,7 @@ test:do_execsql_test(
 
         CREATE TABLE t2(a  INT primary key, b SCALAR);  -- affinity of t2.b is NONE
         CREATE INDEX t2b ON t2(b);
-        INSERT INTO t2 VALUES(2,'99');
+        INSERT INTO t2 VALUES(2,99);
 
         SELECT x, a, y=b FROM t1, t2;
     ]],
@@ -723,7 +723,7 @@ test:do_execsql_test(
 
         CREATE TABLE t2(a  INT primary key, b SCALAR);  -- affinity of t2.b is NONE
         CREATE INDEX t2b ON t2(b);
-        INSERT INTO t2 VALUES(2,'99');
+        INSERT INTO t2 VALUES(2,99);
 
         SELECT x, a, y=b FROM t1, t2;
     ]],
@@ -823,7 +823,7 @@ test:do_execsql_test(
 
         CREATE TABLE t2(a  INT primary key, b SCALAR);  -- affinity of t2.b is NONE
         CREATE INDEX t2b ON t2(b);
-        INSERT INTO t2 VALUES(2,'99');
+        INSERT INTO t2 VALUES(2,99);
 
         SELECT x, a, y=b FROM t1, t2;
     ]],

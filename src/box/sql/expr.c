@@ -409,7 +409,20 @@ expr_cmp_mutual_type(struct Expr *pExpr)
 	enum field_type type = sql_expr_type(pExpr->pLeft);
 	if (pExpr->pRight) {
 		enum field_type rhs_type = sql_expr_type(pExpr->pRight);
-		type = sql_type_result(rhs_type, type);
+		if (type == rhs_type)
+			return type;
+		if (type == FIELD_TYPE_SCALAR)
+			return type;
+		if (sql_type_is_numeric(type) &&
+		    sql_type_is_numeric(rhs_type)) {
+			if (type == FIELD_TYPE_NUMBER)
+				return type;
+			if (type == FIELD_TYPE_INTEGER &&
+			    rhs_type == FIELD_TYPE_UNSIGNED)
+				return type;
+			return rhs_type;
+		}
+		type = rhs_type;
 	} else if (ExprHasProperty(pExpr, EP_xIsSelect)) {
 		enum field_type rhs_type =
 			sql_expr_type(pExpr->x.pSelect->pEList->a[0].pExpr);

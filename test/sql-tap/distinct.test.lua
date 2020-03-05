@@ -108,7 +108,7 @@ local data = {
     {"1.1", 0, "SELECT DISTINCT b, c FROM t1"},
     {"1.2", 1, "SELECT DISTINCT b, c FROM t4"},
     {"2.1", 0, "SELECT DISTINCT c FROM t1 WHERE b = ?"},
-    {"2.2", 1, "SELECT DISTINCT c FROM t4 WHERE b = ?"},
+    {"2.2", 1, "SELECT DISTINCT c FROM t4 WHERE b = 1"},
     {"5 ", 1, "SELECT DISTINCT x FROM t2"},
     {"6 ", 1, "SELECT DISTINCT * FROM t2"},
     {"7 ", 1, "SELECT DISTINCT * FROM (SELECT * FROM t2)"},

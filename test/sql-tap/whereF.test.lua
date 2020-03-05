@@ -148,7 +148,7 @@ test:do_execsql_test(
         CREATE TABLE t4(a INT,b INT,c INT,d INT,e INT, PRIMARY KEY(a,b,c));
         CREATE INDEX t4adc ON t4(a,d,c);
         CREATE UNIQUE INDEX t4aebc ON t4(a,e,b,c);
-        EXPLAIN QUERY PLAN SELECT a FROM t4 WHERE a=? AND b=?;
+        EXPLAIN QUERY PLAN SELECT a FROM t4 WHERE a=1 AND b=1;
     ]], {
         -- <4.0>
         "/A=. AND B=./"
