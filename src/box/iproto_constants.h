@@ -112,6 +112,7 @@ enum iproto_key {
 	IPROTO_METADATA = 0x32,
 	IPROTO_BIND_METADATA = 0x33,
 	IPROTO_BIND_COUNT = 0x34,
+	IPROTO_NEG_PARAM = 0x35,
 
 	/* Leave a gap between response keys and SQL keys. */
 	IPROTO_SQL_TEXT = 0x40,
@@ -215,6 +216,8 @@ enum iproto_type {
 	IPROTO_NOP = 12,
 	/** Prepare SQL statement. */
 	IPROTO_PREPARE = 13,
+	/** Negotiation of session parameters */
+	IPROTO_NEGOTIATION = 14,
 	/** The maximum typecode used for box.stat() */
 	IPROTO_TYPE_STAT_MAX,
 
@@ -466,6 +469,14 @@ vy_row_index_key_name(enum vy_row_index_key key)
 	extern const char *vy_row_index_key_strs[];
 	return vy_row_index_key_strs[key];
 }
+
+/**
+ * Negotiation protocol's keys
+ */
+enum neg_key {
+	/** Version of an error format */
+	ERROR_FORMAT_VERSION
+};
 
 #if defined(__cplusplus)
 } /* extern "C" */

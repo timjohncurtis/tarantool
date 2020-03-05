@@ -37,6 +37,7 @@
 #include "error.h"
 #include "tt_static.h"
 #include "sql_stmt_cache.h"
+#include "iproto_constants.h"
 
 const char *session_type_strs[] = {
 	"background",
@@ -143,6 +144,9 @@ session_create(enum session_type type)
 	session->sql_flags = default_flags;
 	session->sql_default_engine = SQL_STORAGE_ENGINE_MEMTX;
 	session->sql_stmts = NULL;
+
+	/* Set default negotiation parameters */
+	session->neg_param.err_format_ver = ERR_FORMAT_DEF;
 
 	/* For on_connect triggers. */
 	credentials_create(&session->credentials, guest_user);
@@ -371,5 +375,13 @@ int64_t
 generic_session_sync(struct session *session)
 {
 	(void) session;
+	return 0;
+}
+
+int
+session_update_neg_parameters(struct session *session,
+			      const struct negotiation_params *params)
+{
+	session->neg_param.err_format_ver = params->err_format_ver;
 	return 0;
 }

@@ -197,6 +197,8 @@ struct iproto_msg
 		struct auth_request auth;
 		/* SQL request, if this is the EXECUTE/PREPARE request. */
 		struct sql_request sql;
+		/** Negotiation request */
+		struct negotiation_params neg_req;
 		/** In case of iproto parse error, saved diagnostics. */
 		struct diag diag;
 	};
@@ -1309,6 +1311,16 @@ iproto_msg_decode(struct iproto_msg *msg, const char **pos, const char *reqend,
 			goto error;
 		cmsg_init(&msg->base, misc_route);
 		break;
+	case IPROTO_NEGOTIATION: {
+		struct session *ses = msg->connection->session;
+		/* Copy current parameters to modify */
+		memcpy(&msg->neg_req, &ses->neg_param,
+		       sizeof(struct negotiation_params));
+		if (xrow_decode_negotiation(&msg->header, &msg->neg_req))
+			goto error;
+		cmsg_init(&msg->base, misc_route);
+		break;
+	}
 	default:
 		diag_set(ClientError, ER_UNKNOWN_REQUEST_TYPE,
 			 (uint32_t) type);
@@ -1713,6 +1725,14 @@ tx_process_misc(struct cmsg *m)
 			box_process_vote(&ballot);
 			iproto_reply_vote_xc(out, &ballot, msg->header.sync,
 					     ::schema_version);
+			break;
+		case IPROTO_NEGOTIATION:
+			session_update_neg_parameters(con->session,
+						      &msg->neg_req);
+			iproto_reply_negotiation_xc(out,
+						    &con->session->neg_param,
+						    msg->header.sync,
+						    ::schema_version);
 			break;
 		default:
 			unreachable();

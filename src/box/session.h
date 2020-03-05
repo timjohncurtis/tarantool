@@ -81,6 +81,24 @@ union session_meta {
 };
 
 /**
+ * An error transmission formats
+ */
+enum error_formats {
+	/** Default(old) format */
+	ERR_FORMAT_DEF,
+	/** Extended format */
+	ERR_FORMAT_EX
+};
+
+/**
+ * Parameters which may be changed at negotiation phase of session
+*/
+struct negotiation_params {
+	/** Version of a format for an error transmission */
+	uint8_t err_format_ver;
+};
+
+/**
  * Abstraction of a single user session:
  * for now, only provides accounting of established
  * sessions and on-connect/on-disconnect event
@@ -110,6 +128,8 @@ struct session {
 	struct credentials credentials;
 	/** Trigger for fiber on_stop to cleanup created on-demand session */
 	struct trigger fiber_on_stop;
+	/** Negotiation parameters */
+	struct negotiation_params neg_param;
 };
 
 struct session_vtab {
@@ -363,6 +383,13 @@ generic_session_fd(struct session *session);
 /** Return 0 from any session. */
 int64_t
 generic_session_sync(struct session *session);
+
+/**
+ * Update negatiation parameters of the session
+*/
+int
+session_update_neg_parameters(struct session *session,
+			      const struct negotiation_params *params);
 
 #if defined(__cplusplus)
 } /* extern "C" */

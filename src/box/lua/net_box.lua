@@ -26,6 +26,7 @@ local check_primary_index = box.internal.check_primary_index
 local communicate     = internal.communicate
 local encode_auth     = internal.encode_auth
 local encode_select   = internal.encode_select
+local encode_negotiation = internal.encode_negotiation
 local decode_greeting = internal.decode_greeting
 
 local TIMEOUT_INFINITY = 500 * 365 * 86400
@@ -38,12 +39,13 @@ local IPROTO_STATUS_KEY    = 0x00
 local IPROTO_ERRNO_MASK    = 0x7FFF
 local IPROTO_SYNC_KEY      = 0x01
 local IPROTO_SCHEMA_VERSION_KEY = 0x05
-local IPROTO_METADATA_KEY = 0x32
-local IPROTO_SQL_INFO_KEY = 0x42
+local IPROTO_METADATA_KEY  = 0x32
+local IPROTO_SQL_INFO_KEY  = 0x42
 local SQL_INFO_ROW_COUNT_KEY = 0
 local IPROTO_FIELD_NAME_KEY = 0
 local IPROTO_DATA_KEY      = 0x30
 local IPROTO_ERROR_KEY     = 0x31
+local IPROTO_NEG_PARAM     = 0x35
 local IPROTO_GREETING_SIZE = 128
 local IPROTO_CHUNK_KEY     = 128
 local IPROTO_OK_KEY        = 0
@@ -56,6 +58,11 @@ local E_PROC_LUA             = box.error.PROC_LUA
 
 -- utility tables
 local is_final_state         = {closed = 1, error = 1}
+
+-- negotiations keys
+local neg_keys = {
+    ERROR_FORMAT_VERSION = 0
+}
 
 local function decode_nil(raw_data, raw_data_end)
     return nil, raw_data_end
@@ -82,6 +89,10 @@ end
 local function decode_push(raw_data)
     local response, raw_end = decode(raw_data)
     return response[IPROTO_DATA_KEY][1], raw_end
+end
+local function decode_negotiation(raw_data)
+    local response, raw_end = decode(raw_data)
+    return response[IPROTO_NEG_PARAM], raw_end
 end
 
 local function version_id(major, minor, patch)
@@ -110,6 +121,7 @@ local method_encoder = {
     min     = internal.encode_select,
     max     = internal.encode_select,
     count   = internal.encode_call,
+    negotiation = internal.encode_negotiation,
     -- inject raw data into connection, used by console and tests
     inject = function(buf, id, bytes)
         local ptr = buf:reserve(#bytes)
@@ -138,9 +150,12 @@ local method_decoder = {
     count   = decode_count,
     inject  = decode_data,
     push    = decode_push,
+    negotiation = decode_negotiation
 }
 
-local function next_id(id) return band(id + 1, 0x7FFFFFFF) end
+local function next_id(id)
+    return band(id + 1, 0x7FFFFFFF)
+end
 
 --
 -- Connect to a remote server, do handshake.
@@ -435,7 +450,9 @@ local function create_transport(host, port, user, password, callback,
     local protocol_sm
 
     local function start()
-        if state ~= 'initial' then return not is_final_state[state] end
+        if state ~= 'initial' then
+            return not is_final_state[state]
+        end
         fiber.create(function()
             local ok, err, timeout
             worker_fiber = fiber_self()
@@ -804,7 +821,9 @@ local function create_transport(host, port, user, password, callback,
 
     iproto_sm = function(schema_version)
         local err, hdr, body_rpos, body_end = send_and_recv_iproto()
-        if err then return error_sm(err, hdr) end
+        if err then
+            return error_sm(err, hdr)
+        end
         dispatch_response_iproto(hdr, body_rpos, body_end)
         local status = hdr[IPROTO_STATUS_KEY]
         local response_schema_version = hdr[IPROTO_SCHEMA_VERSION_KEY]
@@ -821,7 +840,10 @@ local function create_transport(host, port, user, password, callback,
     end
 
     error_sm = function(err, msg)
-        if connection then connection:close(); connection = nil end
+        if connection then
+            connection:close()
+            connection = nil
+        end
         send_buf:recycle()
         recv_buf:recycle()
         if state ~= 'closed' then
@@ -924,8 +946,11 @@ local console_mt = {
 
 local space_metatable, index_metatable
 
+
+
 local function new_sm(host, port, opts, connection, greeting)
-    local user, password = opts.user, opts.password; opts.password = nil
+    local user, password = opts.user, opts.password
+    opts.password = nil
     local last_reconnect_error
     local remote = {host = host, port = port, opts = opts, state = 'initial'}
     local function callback(what, ...)
@@ -1004,6 +1029,24 @@ local function new_sm(host, port, opts, connection, greeting)
     if opts.wait_connected ~= false then
         remote._transport.wait_state('active', tonumber(opts.wait_connected))
     end
+
+    -- Negotiation if needed
+    if opts.error_extended then
+        local peer_has_negotiation = version_at_least(remote.peer_version_id, 2, 4, 1)
+        if not peer_has_negotiation then
+            box.error(box.error.PROC_LUA, "Negotiations failed")
+        end
+        local neg_req = {error_format_ver = 1}
+        local neg_resp = remote:_request("negotiation", nil, nil, neg_req)
+        if neg_resp[neg_keys.ERROR_FORMAT_VERSION] ~= 1 then
+            remote._transport.stop()
+            box.error(box.error.PROC_LUA, "Negotiations failed")
+        end
+
+        remote._error_extended = true
+    end
+    -- Negotiation end
+
     return remote
 end
 

@@ -417,6 +417,39 @@ netbox_encode_upsert(lua_State *L)
 }
 
 static int
+netbox_encode_negotiation(lua_State *L)
+{
+	if (lua_gettop(L) < 3)
+		return luaL_error(L, "Usage: netbox.encode_negotiation(ibuf, sync, "
+				     "opts)");
+
+
+	/* Check opts is table and parse it */
+	if (lua_istable(L, 3) == 0) {
+		return luaL_error(L, "Expected opts is table");
+	}
+
+	lua_getfield(L, 3, "error_format_ver");
+
+	int err_format_ver = ERR_FORMAT_DEF;
+	if (lua_isnumber(L, -1)) {
+		err_format_ver = lua_tonumber(L, -1);
+	}
+
+	struct mpstream stream;
+	size_t svp = netbox_prepare_request(L, &stream, IPROTO_NEGOTIATION);
+	netbox_encode_request(&stream, svp);
+
+	mpstream_encode_map(&stream, 1);
+	mpstream_encode_uint(&stream, ERROR_FORMAT_VERSION);
+	mpstream_encode_uint(&stream, err_format_ver);
+
+	netbox_encode_request(&stream, svp);
+
+	return 0;
+}
+
+static int
 netbox_decode_greeting(lua_State *L)
 {
 	struct greeting greeting;
@@ -901,6 +934,7 @@ luaopen_net_box(struct lua_State *L)
 		{ "encode_execute", netbox_encode_execute},
 		{ "encode_prepare", netbox_encode_prepare},
 		{ "encode_auth",    netbox_encode_auth },
+		{ "encode_negotiation", netbox_encode_negotiation },
 		{ "decode_greeting",netbox_decode_greeting },
 		{ "communicate",    netbox_communicate },
 		{ "decode_select",  netbox_decode_select },

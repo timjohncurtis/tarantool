@@ -479,6 +479,42 @@ iproto_reply_vote(struct obuf *out, const struct ballot *ballot,
 }
 
 int
+iproto_reply_negotiation(struct obuf *out,
+			 const struct negotiation_params *neg_param,
+			 uint64_t sync,
+			 uint32_t schema_version)
+{
+	char *buf = NULL;
+	uint32_t buf_size = IPROTO_HEADER_LEN + mp_sizeof_map(1)
+		+ mp_sizeof_uint(IPROTO_NEG_PARAM) + mp_sizeof_map(1)
+		+ mp_sizeof_uint(ERROR_FORMAT_VERSION)
+		+ mp_sizeof_uint(neg_param->err_format_ver);
+
+	buf = obuf_reserve(out, buf_size);
+	if (buf == NULL) {
+		diag_set(OutOfMemory, buf_size,
+			 "obuf_alloc", "buf");
+		return -1;
+	};
+
+	char *data = buf + IPROTO_HEADER_LEN;
+	data = mp_encode_map(data, 1);
+	data = mp_encode_uint(data, IPROTO_NEG_PARAM);
+	data = mp_encode_map(data, 1);
+	data = mp_encode_uint(data, ERROR_FORMAT_VERSION);
+	data = mp_encode_uint(data, neg_param->err_format_ver);
+	assert(data == buf + buf_size);
+
+	iproto_header_encode(buf, IPROTO_OK, sync, schema_version,
+			     buf_size - IPROTO_HEADER_LEN);
+
+	char *ptr = obuf_alloc(out, buf_size);
+	(void) ptr;
+	assert(ptr == buf);
+	return 0;
+}
+
+int
 iproto_reply_error(struct obuf *out, const struct error *e, uint64_t sync,
 		   uint32_t schema_version)
 {
@@ -1515,6 +1551,57 @@ greeting_decode(const char *greetingbuf, struct greeting *greeting)
 					   sizeof(greeting->salt));
 	if (greeting->salt_len < SCRAMBLE_SIZE || greeting->salt_len >= (uint32_t)h)
 		return -1;
+
+	return 0;
+}
+
+int
+xrow_decode_negotiation(const struct xrow_header *row,
+			struct negotiation_params *request)
+{
+	if (row->bodycnt == 0) {
+		diag_set(ClientError, ER_INVALID_MSGPACK,
+			 "missing request body");
+		return -1;
+	}
+
+	assert(row->bodycnt == 1);
+	const char *data = (const char *) row->body[0].iov_base;
+
+	const char *end = data + row->body[0].iov_len;
+	assert((end - data) > 0);
+
+	if (mp_typeof(*data) != MP_MAP || mp_check_map(data, end) > 0) {
+error:
+		xrow_on_decode_err(row->body[0].iov_base,
+				   end, ER_INVALID_MSGPACK,
+				   "packet body");
+		return -1;
+	}
+
+	uint32_t map_size = mp_decode_map(&data);
+	for (uint32_t i = 0; i < map_size; ++i) {
+		if ((end - data) < 1 || mp_typeof(*data) != MP_UINT)
+			goto error;
+
+		uint64_t key = mp_decode_uint(&data);
+
+		switch (key) {
+		case ERROR_FORMAT_VERSION:
+			if (mp_typeof(*data) != MP_UINT)
+				goto error;
+			request->err_format_ver = mp_decode_uint(&data);
+			break;
+		default:
+			/* unknown key */
+			continue;
+		}
+	}
+	if (data != end) {
+		xrow_on_decode_err(row->body[0].iov_base, end,
+				   ER_INVALID_MSGPACK, "packet end");
+		return -1;
+	}
 
 	return 0;
 }

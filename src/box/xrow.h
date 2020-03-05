@@ -37,6 +37,7 @@
 
 #include "uuid/tt_uuid.h"
 #include "diag.h"
+#include "session.h"
 #include "vclock.h"
 
 #if defined(__cplusplus)
@@ -175,6 +176,17 @@ struct request {
 	/** Base field offset for UPDATE/UPSERT, e.g. 0 for C and 1 for Lua. */
 	int index_base;
 };
+
+/**
+ * Decode negotiation request
+ * @param row
+ * @param request
+ * @retval -1 on error, see diag
+ * @retval 0 success
+ */
+int
+xrow_decode_negotiation(const struct xrow_header *row,
+			struct negotiation_params *request);
 
 /**
  * Create a JSON-like string representation of a request. */
@@ -566,6 +578,22 @@ int
 iproto_reply_error(struct obuf *out, const struct error *e, uint64_t sync,
 		   uint32_t schema_version);
 
+/**
+ * Write a negotiation reply packet to output buffer.
+ * @param out Buffer to write to.
+ * @param neg_param Current negotiation parameters.
+ * @param sync Request sync.
+ * @param schema_version Actual schema version.
+ *
+ * @retval  0 Success.
+ * @retval -1 Memory error.
+ */
+int
+iproto_reply_negotiation(struct obuf *out,
+			 const struct negotiation_params *neg_param,
+			 uint64_t sync,
+			 uint32_t schema_version);
+
 /** EXECUTE/PREPARE request. */
 struct sql_request {
 	/** SQL statement text. */
@@ -933,6 +961,16 @@ iproto_reply_vote_xc(struct obuf *out, const struct ballot *ballot,
 		       uint64_t sync, uint32_t schema_version)
 {
 	if (iproto_reply_vote(out, ballot, sync, schema_version) != 0)
+		diag_raise();
+}
+
+/** @copydoc iproto_reply_negotiation. */
+static inline void
+iproto_reply_negotiation_xc(struct obuf *out,
+			    const struct negotiation_params *neg_param,
+			    uint64_t sync, uint32_t schema_version)
+{
+	if (iproto_reply_negotiation(out, neg_param, sync, schema_version) != 0)
 		diag_raise();
 }
 
