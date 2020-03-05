@@ -660,6 +660,216 @@ vdbe_field_ref_fetch_field(struct vdbe_field_ref *field_ref, uint32_t fieldno)
 }
 
 /**
+ * Prepare mem to use for comparison with value with type UNSIGNED
+ * from index.
+ *
+ * @param[out] mem Mem to prepare for comparison.
+ * @param[in][out] op Operation that was before preperation and
+ *                 operation after.
+ * @param is_eq True if operation was EQ.
+ * @param[out] is_none True if nothing will be found.
+ * @retval 0 on success.
+ * @retval -1 on error.
+ */
+static int
+sql_mem_to_unsigned_for_comp(struct Mem *mem, uint32_t *op, int is_eq,
+			     bool *is_none)
+{
+	assert(*is_none == false);
+	uint32_t orig_op = *op;
+	enum mp_type mp_type = sql_value_type(mem);
+	assert(mp_type == MP_DOUBLE || mp_type == MP_INT);
+	if (mp_type == MP_INT || mem->u.r < 0) {
+		if (orig_op == OP_SeekGE || orig_op == OP_SeekGT) {
+			mem_set_u64(mem, 0);
+			*op = OP_SeekGE;
+			return 0;
+		}
+		*is_none = true;
+		return 0;
+	}
+	double d = mem->u.r;
+	if (d >= UINT64_MAX) {
+		if (orig_op == OP_SeekLE || orig_op == OP_SeekLT) {
+			mem_set_u64(mem, UINT64_MAX);
+			*op = OP_SeekLE;
+			return 0;
+		}
+		*is_none = true;
+		return 0;
+	}
+	uint64_t u = (uint64_t)d;
+	if (d != u && is_eq) {
+		*is_none = true;
+		return 0;
+	}
+	mem_set_u64(mem, u);
+	if (d == u)
+		return 0;
+	if (orig_op == OP_SeekGE)
+		*op = OP_SeekGT;
+	else if (orig_op == OP_SeekLT)
+		*op = OP_SeekLE;
+	return 0;
+}
+
+/**
+ * Prepare mem to use for comparison with value with type INTEGER
+ * from index.
+ *
+ * @param[out] mem Mem to prepare for comparison.
+ * @param[in][out] op Operation that was before preperation and
+ *                 operation after.
+ * @param is_eq True if operation was EQ.
+ * @param[out] is_none True if nothing will be found.
+ * @retval 0 on success.
+ * @retval -1 on error.
+ */
+static int
+sql_mem_to_integer_for_comp(struct Mem *mem, uint32_t *op, int is_eq,
+			    bool *is_none)
+{
+	assert(*is_none == false);
+	uint32_t orig_op = *op;
+	assert(sql_value_type(mem) == MP_DOUBLE);
+	double d = mem->u.r;
+	if (d < INT64_MIN) {
+		if (orig_op == OP_SeekGE || orig_op == OP_SeekGT) {
+			mem_set_i64(mem, INT64_MIN);
+			*op = OP_SeekGE;
+			return 0;
+		}
+		*is_none = true;
+		return 0;
+	}
+	if (d >= UINT64_MAX) {
+		if (orig_op == OP_SeekLE || orig_op == OP_SeekLT) {
+			mem_set_u64(mem, UINT64_MAX);
+			*op = OP_SeekLE;
+			return 0;
+		}
+		*is_none = true;
+		return 0;
+	}
+	int64_t i = (int64_t)d;
+	uint64_t u = (uint64_t)d;
+	if (d != i && d != u && is_eq) {
+		*is_none = true;
+		return 0;
+	}
+	if (d > 0)
+		mem_set_u64(mem, u);
+	else
+		mem_set_i64(mem, i);
+	if (d == u || d == i)
+		return 0;
+	if (d >= 0) {
+		if (orig_op == OP_SeekGE)
+			*op = OP_SeekGT;
+		else if (orig_op == OP_SeekLT)
+			*op = OP_SeekLE;
+		return 0;
+	}
+	if (orig_op == OP_SeekLE)
+		*op = OP_SeekLT;
+	else if (orig_op == OP_SeekGT)
+		*op = OP_SeekGE;
+	return 0;
+}
+
+/**
+ * Prepare mem to use for comparison with value with type DOUBLE
+ * from index.
+ *
+ * @param[out] mem Mem to prepare for comparison.
+ * @param[in][out] op Operation that was before preperation and
+ *                 operation after.
+ * @param is_eq True if operation was EQ.
+ * @param[out] is_none True if nothing will be found.
+ * @retval 0 on success.
+ * @retval -1 on error.
+ */
+static int
+sql_mem_to_double_for_comp(struct Mem *mem, uint32_t *op, int is_eq,
+			   bool *is_none)
+{
+	assert(*is_none == false);
+	uint32_t orig_op = *op;
+	enum mp_type mp_type = sql_value_type(mem);
+	assert(mp_type == MP_INT || mp_type == MP_UINT);
+	int64_t i = mem->u.i;
+	uint64_t u = mem->u.u;
+	/* 2^53 == 9007199254740992 */
+	if (mp_type == MP_INT && i > -9007199254740992) {
+		sqlVdbeMemSetDouble(mem, i);
+		return 0;
+	} else if (mp_type == MP_UINT && u < 9007199254740992) {
+		sqlVdbeMemSetDouble(mem, u);
+		return 0;
+	}
+
+	double d = mp_type == MP_INT ? (double)i : (double)u;
+	if (is_eq) {
+		if (i != d && u != d)
+			*is_none = true;
+		else
+			sqlVdbeMemSetDouble(mem, d);
+		return 0;
+	}
+
+	sqlVdbeMemSetDouble(mem, d);
+	if (mp_type == MP_INT) {
+		if (orig_op == OP_SeekGT && d > i)
+			*op = OP_SeekGE;
+		else if (orig_op == OP_SeekGE && d < i)
+			*op = OP_SeekGT;
+		else if (orig_op == OP_SeekLT && d < i)
+			*op = OP_SeekLE;
+		else if (orig_op == OP_SeekLE && d > i)
+			*op = OP_SeekLT;
+		return 0;
+	}
+	if (orig_op == OP_SeekGT && d > u)
+		*op = OP_SeekGE;
+	else if (orig_op == OP_SeekGE && d < u)
+		*op = OP_SeekGT;
+	else if (orig_op == OP_SeekLT && d < u)
+		*op = OP_SeekLE;
+	else if (orig_op == OP_SeekLE && d > u)
+		*op = OP_SeekLT;
+	return 0;
+}
+
+/**
+ * Prepare mem to use for comparison with value with numeric type
+ * from index.
+ *
+ * @param[in][out] r Unpacked tuple that should be prepared for
+ *                 comparison.
+ * @param i field of unpacked tuple that should be prepared.
+ * @param is_eq True if operation was EQ.
+ * @param[out] is_none True if nothing will be found.
+ * @retval 0 on success.
+ * @retval -1 on error.
+ */
+static int
+sql_prepare_rec_for_comp(struct UnpackedRecord *r, int i, int is_eq,
+			 bool *is_none)
+{
+	struct Mem *mem = &r->aMem[i];
+	enum field_type field_type = r->key_def->parts[i].type;
+	uint32_t opcode = r->opcode;
+	if (field_type == FIELD_TYPE_UNSIGNED)
+		sql_mem_to_unsigned_for_comp(mem, &opcode, is_eq, is_none);
+	else if (field_type == FIELD_TYPE_INTEGER)
+		sql_mem_to_integer_for_comp(mem, &opcode, is_eq, is_none);
+	else
+		sql_mem_to_double_for_comp(mem, &opcode, is_eq, is_none);
+	r->opcode = opcode;
+	return 0;
+}
+
+/**
  * Find the left closest field for a given fieldno in field_ref's
  * slot_bitmask. The fieldno is expected to be greater than 0.
  * @param field_ref The vdbe_field_ref instance to use.
@@ -2050,15 +2260,15 @@ case OP_Cast: {                  /* in1 */
  * jump to address P2.  Or if the SQL_STOREP2 flag is set in P5, then
  * store the result of comparison in register P2.
  *
- * Once any conversions have taken place, and neither value is NULL,
- * the values are compared. If both values are blobs then memcmp() is
- * used to determine the results of the comparison.  If both values
- * are text, then the appropriate collating function specified in
- * P4 is used to do the comparison.  If P4 is not specified then
- * memcmp() is used to compare text string.  If both values are
- * numeric, then a numeric comparison is used. If the two values
- * are of different types, then numbers are considered less than
- * strings and strings are considered less than blobs.
+ * If neither value is NULL, the values are compared. If both
+ * values are blobs then memcmp() is used to determine the results
+ * of the comparison. If both values are booleans, TRUE if more
+ * than FALSE. If both values are text, then the appropriate
+ * collating function specified in P4 is used to do the
+ * comparison. If P4 is not specified then memcmp() is used to
+ * compare text string. If both values are numeric, then a numeric
+ * comparison is used. If both values are not NULL and the above
+ * rules cannot be applied to them, an error is generated.
  *
  * If SQL_NULLEQ is set in P5 then the result of comparison is always either
  * true or false and is never NULL.  If both operands are NULL then the result
@@ -2096,15 +2306,8 @@ case OP_Cast: {                  /* in1 */
  * reg(P3) is NULL then the take the jump.  If the SQL_JUMPIFNULL
  * bit is clear then fall through if either operand is NULL.
  *
- * Once any conversions have taken place, and neither value is NULL,
- * the values are compared. If both values are blobs then memcmp() is
- * used to determine the results of the comparison.  If both values
- * are text, then the appropriate collating function specified in
- * P4 is  used to do the comparison.  If P4 is not specified then
- * memcmp() is used to compare text string.  If both values are
- * numeric, then a numeric comparison is used. If the two values
- * are of different types, then numbers are considered less than
- * strings and strings are considered less than blobs.
+ * See the Eq opcode for additional information about comparison
+ * rules.
  */
 /* Opcode: Le P1 P2 P3 P4 P5
  * Synopsis: IF r[P3]<=r[P1]
@@ -2133,189 +2336,109 @@ case OP_Lt:               /* same as TK_LT, jump, in1, in3 */
 case OP_Le:               /* same as TK_LE, jump, in1, in3 */
 case OP_Gt:               /* same as TK_GT, jump, in1, in3 */
 case OP_Ge: {             /* same as TK_GE, jump, in1, in3 */
-	int res, res2;      /* Result of the comparison of pIn1 against pIn3 */
-	u32 flags1;         /* Copy of initial value of pIn1->flags */
-	u32 flags3;         /* Copy of initial value of pIn3->flags */
-
+	/*
+	 * Result of comparison: more than 0 if l > r,
+	 * 0 if l == r, less than 0 if l < r.
+	 */
+	int cmp_res;
+	/* Result of the operation. */
+	bool result;
 	pIn1 = &aMem[pOp->p1];
 	pIn3 = &aMem[pOp->p3];
-	flags1 = pIn1->flags;
-	flags3 = pIn3->flags;
-	enum field_type ft_p1 = pIn1->field_type;
-	enum field_type ft_p3 = pIn3->field_type;
-	if ((flags1 | flags3)&MEM_Null) {
-		/* One or both operands are NULL */
-		if (pOp->p5 & SQL_NULLEQ) {
-			/* If SQL_NULLEQ is set (which will only happen if the operator is
-			 * OP_Eq or OP_Ne) then take the jump or not depending on whether
-			 * or not both operands are null.
-			 */
-			assert(pOp->opcode==OP_Eq || pOp->opcode==OP_Ne);
-			assert((flags1 & MEM_Cleared)==0);
-			assert((pOp->p5 & SQL_JUMPIFNULL)==0);
-			if ((flags1&flags3&MEM_Null)!=0
-			    && (flags3&MEM_Cleared)==0
-				) {
-				res = 0;  /* Operands are equal */
-			} else {
-				res = 1;  /* Operands are not equal */
-			}
-		} else {
-			/* SQL_NULLEQ is clear and at least one operand is NULL,
-			 * then the result is always NULL.
-			 * The jump is taken if the SQL_JUMPIFNULL bit is set.
+
+	bool has_scalar = (pIn1->field_type == FIELD_TYPE_SCALAR) ||
+			  (pIn3->field_type == FIELD_TYPE_SCALAR);
+	enum mp_type ltype = sql_value_type(pIn1);
+	enum mp_type rtype = sql_value_type(pIn3);
+	assert(ltype != MP_MAP && rtype != MP_MAP);
+	assert(ltype != MP_ARRAY && rtype != MP_ARRAY);
+	int mp_classes_comp = mp_type_classes_comp(rtype, ltype);
+
+	if (ltype == MP_NIL || rtype == MP_NIL) {
+		if ((pOp->p5 & SQL_NULLEQ) == 0) {
+			/*
+			 * SQL_NULLEQ is clear and at least one
+			 * operand is NULL, then the result is
+			 * always NULL. The jump is taken if the
+			 * SQL_JUMPIFNULL bit is set.
 			 */
 			if (pOp->p5 & SQL_STOREP2) {
 				pOut = vdbe_prepare_null_out(p, pOp->p2);
-				iCompare = 1;    /* Operands are not equal */
+				iCompare = 1;
 				REGISTER_TRACE(p, pOp->p2, pOut);
 			} else {
 				VdbeBranchTaken(2,3);
-				if (pOp->p5 & SQL_JUMPIFNULL) {
+				if (pOp->p5 & SQL_JUMPIFNULL)
 					goto jump_to_p2;
-				}
 			}
 			break;
 		}
-	} else if (((flags1 | flags3) & MEM_Bool) != 0 ||
-		   ((flags1 | flags3) & MEM_Blob) != 0) {
 		/*
-		 * If one of values is of type BOOLEAN or VARBINARY,
-		 * then the second one must be of the same type as
-		 * well. Otherwise an error is raised.
+		 * If SQL_NULLEQ is set (which will only happen if
+		 * the operator is OP_Eq or OP_Ne) then take the
+		 * jump or not depending on whether or not both
+		 * operands are null.
 		 */
-		int type_arg1 = flags1 & (MEM_Bool | MEM_Blob);
-		int type_arg3 = flags3 & (MEM_Bool | MEM_Blob);
-		if (type_arg1 != type_arg3) {
-			char *inconsistent_type = type_arg1 != 0 ?
-						  mem_type_to_str(pIn3) :
-						  mem_type_to_str(pIn1);
-			char *expected_type     = type_arg1 != 0 ?
-						  mem_type_to_str(pIn1) :
-						  mem_type_to_str(pIn3);
-			diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
-				 inconsistent_type, expected_type);
-			goto abort_due_to_error;
-		}
-		res = sqlMemCompare(pIn3, pIn1, NULL);
+		assert(pOp->opcode == OP_Eq || pOp->opcode == OP_Ne);
+		assert((pOp->p5 & SQL_JUMPIFNULL) == 0);
+		cmp_res = !(ltype == MP_NIL && rtype == MP_NIL);
+	} else if (mp_classes_comp == 0) {
+		cmp_res = sqlMemCompare(pIn3, pIn1, pOp->p4.pColl);
+	} else if (has_scalar) {
+		cmp_res = mp_classes_comp;
 	} else {
-		enum field_type type = pOp->p5 & FIELD_TYPE_MASK;
-		if (sql_type_is_numeric(type)) {
-			if ((flags1 | flags3)&MEM_Str) {
-				if ((flags1 & MEM_Str) == MEM_Str) {
-					mem_apply_numeric_type(pIn1);
-					testcase( flags3!=pIn3->flags); /* Possible if pIn1==pIn3 */
-					flags3 = pIn3->flags;
-				}
-				if ((flags3 & MEM_Str) == MEM_Str) {
-					if (mem_apply_numeric_type(pIn3) != 0) {
-						diag_set(ClientError,
-							 ER_SQL_TYPE_MISMATCH,
-							 sql_value_to_diag_str(pIn3),
-							 "numeric");
-						goto abort_due_to_error;
-					}
-
-				}
-			}
-			/* Handle the common case of integer comparison here, as an
-			 * optimization, to avoid a call to sqlMemCompare()
-			 */
-			if ((pIn1->flags & pIn3->flags & (MEM_Int | MEM_UInt)) != 0) {
-				if ((pIn1->flags & pIn3->flags & MEM_Int) != 0) {
-					if (pIn3->u.i > pIn1->u.i)
-						res = +1;
-					else if (pIn3->u.i < pIn1->u.i)
-						res = -1;
-					else
-						res = 0;
-					goto compare_op;
-				}
-				if ((pIn1->flags & pIn3->flags & MEM_UInt) != 0) {
-					if (pIn3->u.u > pIn1->u.u)
-						res = +1;
-					else if (pIn3->u.u < pIn1->u.u)
-						res = -1;
-					else
-						res = 0;
-					goto compare_op;
-				}
-				if ((pIn1->flags & MEM_UInt) != 0 &&
-				    (pIn3->flags & MEM_Int) != 0) {
-					res = -1;
-					goto compare_op;
-				}
-				res = 1;
-				goto compare_op;
-			}
-		} else if (type == FIELD_TYPE_STRING) {
-			if ((flags1 & MEM_Str) == 0 &&
-			    (flags1 & (MEM_Int | MEM_UInt | MEM_Real)) != 0) {
-				testcase( pIn1->flags & MEM_Int);
-				testcase( pIn1->flags & MEM_Real);
-				sqlVdbeMemStringify(pIn1);
-				testcase( (flags1&MEM_Dyn) != (pIn1->flags&MEM_Dyn));
-				flags1 = (pIn1->flags & ~MEM_TypeMask) | (flags1 & MEM_TypeMask);
-				assert(pIn1!=pIn3);
-			}
-			if ((flags3 & MEM_Str) == 0 &&
-			    (flags3 & (MEM_Int | MEM_UInt | MEM_Real)) != 0) {
-				testcase( pIn3->flags & MEM_Int);
-				testcase( pIn3->flags & MEM_Real);
-				sqlVdbeMemStringify(pIn3);
-				testcase( (flags3&MEM_Dyn) != (pIn3->flags&MEM_Dyn));
-				flags3 = (pIn3->flags & ~MEM_TypeMask) | (flags3 & MEM_TypeMask);
-			}
-		}
-		assert(pOp->p4type==P4_COLLSEQ || pOp->p4.pColl==0);
-		res = sqlMemCompare(pIn3, pIn1, pOp->p4.pColl);
-	}
-			compare_op:
-	switch( pOp->opcode) {
-	case OP_Eq:    res2 = res==0;     break;
-	case OP_Ne:    res2 = res;        break;
-	case OP_Lt:    res2 = res<0;      break;
-	case OP_Le:    res2 = res<=0;     break;
-	case OP_Gt:    res2 = res>0;      break;
-	default:       res2 = res>=0;     break;
+		diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
+			 mem_type_to_str(pIn1), mem_type_to_str(pIn3));
+		goto abort_due_to_error;
 	}
 
-	/* Undo any changes made by mem_apply_type() to the input registers. */
-	assert((pIn1->flags & MEM_Dyn) == (flags1 & MEM_Dyn));
-	pIn1->flags = flags1;
-	pIn1->field_type = ft_p1;
-	assert((pIn3->flags & MEM_Dyn) == (flags3 & MEM_Dyn));
-	pIn3->flags = flags3;
-	pIn3->field_type = ft_p3;
+	switch (pOp->opcode) {
+	case OP_Eq:
+		result = cmp_res == 0;
+		break;
+	case OP_Ne:
+		result = cmp_res != 0;
+		break;
+	case OP_Lt:
+		result = cmp_res < 0;
+		break;
+	case OP_Le:
+		result = cmp_res <= 0;
+		break;
+	case OP_Gt:
+		result = cmp_res > 0;
+		break;
+	case OP_Ge:
+		result = cmp_res >= 0;
+		break;
+	default:
+		unreachable();
+	}
 
 	if (pOp->p5 & SQL_STOREP2) {
-		iCompare = res;
-		res2 = res2!=0;  /* For this path res2 must be exactly 0 or 1 */
-		if ((pOp->p5 & SQL_KEEPNULL)!=0) {
-			/* The KEEPNULL flag prevents OP_Eq from overwriting a NULL with true
-			 * and prevents OP_Ne from overwriting NULL with false.  This flag
-			 * is only used in contexts where either:
-			 *   (1) op==OP_Eq && (r[P2]==NULL || r[P2]==0)
-			 *   (2) op==OP_Ne && (r[P2]==NULL || r[P2]==1)
-			 * Therefore it is not necessary to check the content of r[P2] for
-			 * NULL.
-			 */
-			assert(pOp->opcode==OP_Ne || pOp->opcode==OP_Eq);
-			assert(res2==0 || res2==1);
-			testcase( res2==0 && pOp->opcode==OP_Eq);
-			testcase( res2==1 && pOp->opcode==OP_Eq);
-			testcase( res2==0 && pOp->opcode==OP_Ne);
-			testcase( res2==1 && pOp->opcode==OP_Ne);
-			if ((pOp->opcode==OP_Eq)==res2) break;
+		iCompare = cmp_res;
+		/*
+		 * The KEEPNULL flag prevents OP_Eq from
+		 * overwriting a NULL with true and prevents OP_Ne
+		 * from overwriting NULL with false. This flag
+		 * is only used in contexts where either:
+		 *   (1) op==OP_Eq && (r[P2]==NULL || r[P2]==0)
+		 *   (2) op==OP_Ne && (r[P2]==NULL || r[P2]==1)
+		 * Therefore it is not necessary to check the
+		 * content of r[P2] for NULL.
+		 */
+		if ((pOp->p5 & SQL_KEEPNULL) != 0) {
+			assert(pOp->opcode == OP_Ne || pOp->opcode == OP_Eq);
+			if ((pOp->opcode == OP_Eq) == result)
+				break;
 		}
 		pOut = vdbe_prepare_null_out(p, pOp->p2);
-		mem_set_bool(pOut, res2);
+		mem_set_bool(pOut, result);
 		REGISTER_TRACE(p, pOp->p2, pOut);
 	} else {
-		VdbeBranchTaken(res!=0, (pOp->p5 & SQL_NULLEQ)?2:3);
-		if (res2) {
+		VdbeBranchTaken(cmp_res != 0, (pOp->p5 & SQL_NULLEQ) ? 2 : 3);
+		if (result)
 			goto jump_to_p2;
-		}
 	}
 	break;
 }
@@ -3346,7 +3469,6 @@ case OP_SeekGT: {       /* jump, in3 */
 	VdbeCursor *pC;    /* The cursor to seek */
 	UnpackedRecord r;  /* The key to seek for */
 	int nField;        /* Number of columns or fields in the key */
-	i64 iKey;          /* The id we are to seek to */
 	int eqOnly;        /* Only interested in == results */
 
 	assert(pOp->p1>=0 && pOp->p1<p->nCursor);
@@ -3364,86 +3486,6 @@ case OP_SeekGT: {       /* jump, in3 */
 #ifdef SQL_DEBUG
 	pC->seekOp = pOp->opcode;
 #endif
-	iKey = 0;
-	/*
-	 * In case floating value is intended to be passed to
-	 * iterator over integer field, we must truncate it to
-	 * integer value and change type of iterator:
-	 * a > 1.5 -> a >= 2
-	 */
-	int int_field = pOp->p5;
-	bool is_neg = false;
-
-	if (int_field > 0) {
-		/* The input value in P3 might be of any type: integer, real, string,
-		 * blob, or NULL.  But it needs to be an integer before we can do
-		 * the seek, so convert it.
-		 */
-		pIn3 = &aMem[int_field];
-		if ((pIn3->flags & MEM_Null) != 0)
-			goto skip_truncate;
-		if ((pIn3->flags & MEM_Str) != 0)
-			mem_apply_numeric_type(pIn3);
-		int64_t i;
-		if ((pIn3->flags & MEM_Int) == MEM_Int) {
-			i = pIn3->u.i;
-			is_neg = true;
-		} else if ((pIn3->flags & MEM_UInt) == MEM_UInt) {
-			i = pIn3->u.u;
-			is_neg = false;
-		} else if ((pIn3->flags & MEM_Real) == MEM_Real) {
-			if (pIn3->u.r > INT64_MAX)
-				i = INT64_MAX;
-			else if (pIn3->u.r < INT64_MIN)
-				i = INT64_MIN;
-			else
-				i = pIn3->u.r;
-			is_neg = i < 0;
-		} else {
-			diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
-				 sql_value_to_diag_str(pIn3), "integer");
-			goto abort_due_to_error;
-		}
-		iKey = i;
-
-		/* If the P3 value could not be converted into an integer without
-		 * loss of information, then special processing is required...
-		 */
-		if ((pIn3->flags & (MEM_Int | MEM_UInt)) == 0) {
-			if ((pIn3->flags & MEM_Real)==0) {
-				/* If the P3 value cannot be converted into any kind of a number,
-				 * then the seek is not possible, so jump to P2
-				 */
-				VdbeBranchTaken(1,2); goto jump_to_p2;
-				break;
-			}
-
-			/* If the approximation iKey is larger than the actual real search
-			 * term, substitute >= for > and < for <=. e.g. if the search term
-			 * is 4.9 and the integer approximation 5:
-			 *
-			 *        (x >  4.9)    ->     (x >= 5)
-			 *        (x <= 4.9)    ->     (x <  5)
-			 */
-			if (pIn3->u.r<(double)iKey) {
-				assert(OP_SeekGE==(OP_SeekGT-1));
-				assert(OP_SeekLT==(OP_SeekLE-1));
-				assert((OP_SeekLE & 0x0001)==(OP_SeekGT & 0x0001));
-				if ((oc & 0x0001)==(OP_SeekGT & 0x0001)) oc--;
-			}
-
-			/* If the approximation iKey is smaller than the actual real search
-			 * term, substitute <= for < and > for >=.
-			 */
-			else if (pIn3->u.r>(double)iKey) {
-				assert(OP_SeekLE==(OP_SeekLT+1));
-				assert(OP_SeekGT==(OP_SeekGE+1));
-				assert((OP_SeekLT & 0x0001)==(OP_SeekGE & 0x0001));
-				if ((oc & 0x0001)==(OP_SeekLT & 0x0001)) oc++;
-			}
-		}
-	}
-skip_truncate:
 	/*
 	 * For a cursor with the OPFLAG_SEEKEQ hint, only the
 	 * OP_SeekGE and OP_SeekLE opcodes are allowed, and these
@@ -3465,22 +3507,38 @@ skip_truncate:
 	assert(nField>0);
 	r.key_def = pC->key_def;
 	r.nField = (u16)nField;
-
-	if (int_field > 0)
-		mem_set_int(&aMem[int_field], iKey, is_neg);
-
-	r.default_rc = ((1 & (oc - OP_SeekLT)) ? -1 : +1);
-	assert(oc!=OP_SeekGT || r.default_rc==-1);
-	assert(oc!=OP_SeekLE || r.default_rc==-1);
-	assert(oc!=OP_SeekGE || r.default_rc==+1);
-	assert(oc!=OP_SeekLT || r.default_rc==+1);
-
 	r.aMem = &aMem[pOp->p3];
 #ifdef SQL_DEBUG
 	{ int i; for(i=0; i<r.nField; i++) assert(memIsValid(&r.aMem[i])); }
 #endif
 	r.eqSeen = 0;
 	r.opcode = oc;
+	for (int i = 0; i < nField; ++i) {
+		struct Mem *mem = &r.aMem[i];
+		enum mp_type mp_type = sql_value_type(mem);
+		enum field_type field_type = r.key_def->parts[i].type;
+		bool is_nullable = r.key_def->parts[i].nullable_action ==
+				   ON_CONFLICT_ACTION_NONE;
+		if (field_mp_plain_type_is_compatible(field_type, mp_type,
+						      is_nullable))
+			continue;
+		if (!sql_type_is_numeric(field_type) ||
+		    !sql_mp_type_is_numeric(mp_type)) {
+			diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
+				 mem_type_to_str(mem),
+				 field_type_strs[field_type]);
+			goto abort_due_to_error;
+		}
+		bool is_none = false;
+		if (sql_prepare_rec_for_comp(&r, i, eqOnly, &is_none) != 0)
+			goto abort_due_to_error;
+		oc = r.opcode;
+		if (is_none) {
+			res = 1;
+			goto seek_not_found;
+		}
+	}
+
 	if (sqlCursorMovetoUnpacked(pC->uc.pCursor, &r, &res) != 0)
 		goto abort_due_to_error;
 	if (eqOnly && r.eqSeen==0) {
@@ -4595,26 +4653,36 @@ case OP_IdxGE:  {       /* jump */
 	assert(pOp->p4type==P4_INT32);
 	r.key_def = pC->key_def;
 	r.nField = (u16)pOp->p4.i;
-	if (pOp->opcode<OP_IdxLT) {
-		assert(pOp->opcode==OP_IdxLE || pOp->opcode==OP_IdxGT);
-		r.default_rc = -1;
-	} else {
-		assert(pOp->opcode==OP_IdxGE || pOp->opcode==OP_IdxLT);
-		r.default_rc = 0;
-	}
 	r.aMem = &aMem[pOp->p3];
-#ifdef SQL_DEBUG
-	{ int i; for(i=0; i<r.nField; i++) assert(memIsValid(&r.aMem[i])); }
-#endif
-	int res =  tarantoolsqlIdxKeyCompare(pC->uc.pCursor, &r);
-	assert((OP_IdxLE&1)==(OP_IdxLT&1) && (OP_IdxGE&1)==(OP_IdxGT&1));
-	if ((pOp->opcode&1)==(OP_IdxLT&1)) {
-		assert(pOp->opcode==OP_IdxLE || pOp->opcode==OP_IdxLT);
-		res = -res;
-	} else {
-		assert(pOp->opcode==OP_IdxGE || pOp->opcode==OP_IdxGT);
-		res++;
+	for (int i = 0; i < r.nField; ++i) {
+		struct Mem *mem = &r.aMem[i];
+		enum mp_type mp_type = sql_value_type(mem);
+		enum field_type field_type = r.key_def->parts[i].type;
+		if (field_type == FIELD_TYPE_SCALAR ||
+		    mem->field_type == FIELD_TYPE_SCALAR)
+			continue;
+		bool is_nullable = r.key_def->parts[i].nullable_action ==
+				   ON_CONFLICT_ACTION_NONE;
+		if (field_mp_plain_type_is_compatible(field_type, mp_type,
+						      is_nullable))
+			continue;
+		if (!sql_type_is_numeric(field_type) ||
+		    !sql_mp_type_is_numeric(mp_type)) {
+			diag_set(ClientError, ER_SQL_TYPE_MISMATCH,
+				 mem_type_to_str(mem),
+				 field_type_strs[field_type]);
+			goto abort_due_to_error;
+		}
 	}
+	if (pOp->opcode == OP_IdxLE || pOp->opcode == OP_IdxGT)
+		r.default_rc = -1;
+	else
+		r.default_rc = 0;
+	int res = tarantoolsqlIdxKeyCompare(pC->uc.pCursor, &r);
+	if (pOp->opcode == OP_IdxLE || pOp->opcode == OP_IdxLT)
+		res = -res;
+	else
+		res++;
 	VdbeBranchTaken(res>0,2);
 	if (res>0) goto jump_to_p2;
 	break;

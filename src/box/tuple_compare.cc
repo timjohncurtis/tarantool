@@ -104,6 +104,12 @@ mp_classof(enum mp_type type)
 	return mp_classes[type];
 }
 
+int
+mp_type_classes_comp(enum mp_type ltype, enum mp_type rtype)
+{
+	return mp_classof(ltype) - mp_classof(rtype);
+}
+
 static enum mp_class
 mp_extension_class(const char *data)
 {

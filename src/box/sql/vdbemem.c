@@ -670,6 +670,7 @@ sqlVdbeMemCast(Mem * pMem, enum field_type type)
 		return 0;
 	switch (type) {
 	case FIELD_TYPE_SCALAR:
+		pMem->field_type = FIELD_TYPE_SCALAR;
 		return 0;
 	case FIELD_TYPE_BOOLEAN:
 		if ((pMem->flags & MEM_Int) != 0) {

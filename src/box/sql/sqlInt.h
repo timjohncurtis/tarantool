@@ -1304,6 +1304,9 @@ enum trim_side_mask {
 				 (X) == FIELD_TYPE_UNSIGNED || \
 				 (X) == FIELD_TYPE_DOUBLE)
 
+#define sql_mp_type_is_numeric(X)  ((X) == MP_INT || (X) == MP_UINT || \
+				    (X) == MP_FLOAT || (X) == MP_DOUBLE)
+
 /*
  * Additional bit values that can be ORed with an type without
  * changing the type.

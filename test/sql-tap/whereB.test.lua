@@ -37,7 +37,7 @@ test:do_execsql_test(
         CREATE INDEX t2b ON t2(b);
         INSERT INTO t2 VALUES(2,'99');
 
-        SELECT x, a, y=b FROM t1, t2 ORDER BY +x, +a;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 ORDER BY +x, +a;
     ]],
     {
     -- <whereB-1.1>
@@ -48,7 +48,7 @@ test:do_execsql_test(
 test:do_execsql_test(
     "whereB-1.2",
     [[
-        SELECT x, a, y=b FROM t1, t2 WHERE y=b;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE y=CAST(b AS INTEGER);
     ]],
     {
     -- <whereB-1.2>
@@ -59,7 +59,7 @@ test:do_execsql_test(
 test:do_execsql_test(
     "whereB-1.3",
     [[
-        SELECT x, a, y=b FROM t1, t2 WHERE b=y;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE CAST(b AS INTEGER)=y;
     ]],
     {
     -- <whereB-1.3>
@@ -70,7 +70,7 @@ test:do_execsql_test(
 test:do_execsql_test(
     "whereB-1.4",
     [[
-        SELECT x, a, y=b FROM t1, t2 WHERE +y=+b;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE +y=+CAST(b AS INTEGER);
     ]],
     {
     -- <whereB-1.4>
@@ -82,7 +82,7 @@ test:do_execsql_test(
     "whereB-1.100",
     [[
         DROP INDEX t2b ON t2;
-        SELECT x, a, y=b FROM t1, t2 WHERE y=b;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE y=CAST(b AS INTEGER);
     ]],
     {
     -- <whereB-1.100>
@@ -93,7 +93,7 @@ test:do_execsql_test(
 test:do_execsql_test(
     "whereB-1.101",
     [[
-        SELECT x, a, y=b FROM t1, t2 WHERE b=y;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE CAST(b AS INTEGER)=y;
     ]],
     {
     -- <whereB-1.101>
@@ -104,7 +104,7 @@ test:do_execsql_test(
 test:do_execsql_test(
     "whereB-1.102",
     [[
-        SELECT x, a, y=b FROM t1, t2 WHERE +y=+b;
+        SELECT x, a, y=CAST(b AS INTEGER) FROM t1, t2 WHERE +y=+CAST(b AS INTEGER);
     ]],
     {
     -- <whereB-1.102>
@@ -329,29 +329,29 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-4.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-4.1>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-4.2",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE y=b;
     ]],
     {
     -- <whereB-4.2>
-    1, 2, true
+    1, "Type mismatch: can not convert text to number"
     -- </whereB-4.2>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-4.3",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE b=y;
     ]],
     {
     -- <whereB-4.3>
-    1, 2, true
+    1, "Type mismatch: can not convert text to number"
     -- </whereB-4.3>
     })
 
@@ -364,7 +364,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-4.4>
-    1, 2, true
     -- </whereB-4.4>
     })
 
@@ -376,7 +375,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-4.100>
-    1, 2, true
     -- </whereB-4.100>
     })
 
@@ -387,7 +385,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-4.101>
-    1, 2, true
     -- </whereB-4.101>
     })
 
@@ -400,7 +397,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-4.102>
-    1, 2, true
     -- </whereB-4.102>
     })
 
@@ -429,29 +425,29 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-5.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-5.1>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-5.2",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE y=b;
     ]],
     {
     -- <whereB-5.2>
-    1, 2, true
+    1, "Type mismatch: can not convert text to integer"
     -- </whereB-5.2>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-5.3",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE b=y;
     ]],
     {
     -- <whereB-5.3>
-    1, 2, true
+    1, "Type mismatch: can not convert text to integer"
     -- </whereB-5.3>
     })
 
@@ -464,7 +460,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-5.4>
-    1, 2, true
     -- </whereB-5.4>
     })
 
@@ -476,7 +471,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-5.100>
-    1, 2, true
     -- </whereB-5.100>
     })
 
@@ -487,7 +481,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-5.101>
-    1, 2, true
     -- </whereB-5.101>
     })
 
@@ -500,7 +493,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-5.102>
-    1, 2, true
     -- </whereB-5.102>
     })
 
@@ -529,29 +521,29 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-6.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-6.1>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-6.2",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE y=b;
     ]],
     {
     -- <whereB-6.2>
-    1, 2, true
+    1, "Type mismatch: can not convert text to number"
     -- </whereB-6.2>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "whereB-6.3",
     [[
         SELECT x, a, y=b FROM t1, t2 WHERE b=y;
     ]],
     {
     -- <whereB-6.3>
-    1, 2, true
+    1, "Type mismatch: can not convert text to number"
     -- </whereB-6.3>
     })
 
@@ -564,7 +556,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-6.4>
-    1, 2, true
     -- </whereB-6.4>
     })
 
@@ -576,7 +567,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-6.100>
-    1, 2, true
     -- </whereB-6.100>
     })
 
@@ -587,7 +577,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-6.101>
-    1, 2, true
     -- </whereB-6.101>
     })
 
@@ -600,7 +589,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-6.102>
-    1, 2, true
     -- </whereB-6.102>
     })
 
@@ -629,7 +617,7 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-7.1>
     })
 
@@ -640,7 +628,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.2>
-    1, 2, true
     -- </whereB-7.2>
     })
 
@@ -651,7 +638,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.3>
-    1, 2, true
     -- </whereB-7.3>
     })
 
@@ -664,7 +650,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.4>
-    1, 2, true
     -- </whereB-7.4>
     })
 
@@ -676,7 +661,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.100>
-    1, 2, true
     -- </whereB-7.100>
     })
 
@@ -687,7 +671,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.101>
-    1, 2, true
     -- </whereB-7.101>
     })
 
@@ -700,7 +683,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-7.102>
-    1, 2, true
     -- </whereB-7.102>
     })
 
@@ -729,7 +711,7 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-8.1>
     })
 
@@ -740,7 +722,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.2>
-    1, 2, true
     -- </whereB-8.2>
     })
 
@@ -751,7 +732,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.3>
-    1, 2, true
     -- </whereB-8.3>
     })
 
@@ -764,7 +744,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.4>
-    1, 2, true
     -- </whereB-8.4>
     })
 
@@ -776,7 +755,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.100>
-    1, 2, true
     -- </whereB-8.100>
     })
 
@@ -787,7 +765,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.101>
-    1, 2, true
     -- </whereB-8.101>
     })
 
@@ -800,7 +777,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-8.102>
-    1, 2, true
     -- </whereB-8.102>
     })
 
@@ -829,7 +805,7 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.1>
-    1, 2, true
+    1, 2, false
     -- </whereB-9.1>
     })
 
@@ -840,7 +816,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.2>
-    1, 2, true
     -- </whereB-9.2>
     })
 
@@ -851,7 +826,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.3>
-    1, 2, true
     -- </whereB-9.3>
     })
 
@@ -864,7 +838,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.4>
-    1, 2, true
     -- </whereB-9.4>
     })
 
@@ -876,7 +849,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.100>
-    1, 2, true
     -- </whereB-9.100>
     })
 
@@ -887,7 +859,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.101>
-    1, 2, true
     -- </whereB-9.101>
     })
 
@@ -900,7 +871,6 @@ test:do_execsql_test(
     ]],
     {
     -- <whereB-9.102>
-    1, 2, true
     -- </whereB-9.102>
     })
 

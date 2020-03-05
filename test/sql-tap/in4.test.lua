@@ -147,13 +147,13 @@ test:do_execsql_test(
         -- </in4-2.7>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-2.8",
     [[
         SELECT b FROM t2 WHERE a IN ('', '0.0.0', '2') 
     ]], {
         -- <in4-2.8>
-        "two"
+        1, "Type mismatch: can not convert text to integer"
         -- </in4-2.8>
     })
 
@@ -585,7 +585,7 @@ test:do_execsql_test(
         -- </in4-4.6>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.11",
     [[
         CREATE TABLE t4b(a TEXT, b NUMBER, c  INT PRIMARY KEY);
@@ -593,87 +593,87 @@ test:do_execsql_test(
         SELECT c FROM t4b WHERE a=b;
     ]], {
         -- <in4-4.11>
-        4
+        1, "Type mismatch: can not convert unsigned to text"
         -- </in4-4.11>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.12",
     [[
         SELECT c FROM t4b WHERE b=a;
     ]], {
         -- <in4-4.12>
-        4
+        1, "Type mismatch: can not convert text to unsigned"
         -- </in4-4.12>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.13",
     [[
         SELECT c FROM t4b WHERE +a=b;
     ]], {
         -- <in4-4.13>
-        4
+        1, "Type mismatch: can not convert text to unsigned"
         -- </in4-4.13>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.14",
     [[
         SELECT c FROM t4b WHERE a=+b;
     ]], {
         -- <in4-4.14>
-        4
+        1, "Type mismatch: can not convert unsigned to text"
         -- </in4-4.14>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.15",
     [[
         SELECT c FROM t4b WHERE +b=a;
     ]], {
         -- <in4-4.15>
-        4
+        1, "Type mismatch: can not convert unsigned to text"
         -- </in4-4.15>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.16",
     [[
         SELECT c FROM t4b WHERE b=+a;
     ]], {
         -- <in4-4.16>
-        4
+        1, "Type mismatch: can not convert text to unsigned"
         -- </in4-4.16>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.17",
     [[
         SELECT c FROM t4b WHERE a IN (b);
     ]], {
         -- <in4-4.17>
-        4
+        1, "Type mismatch: can not convert unsigned to text"
         -- </in4-4.17>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.18",
     [[
         SELECT c FROM t4b WHERE b IN (a);
     ]], {
         -- <in4-4.18>
-        4
+        1, "Type mismatch: can not convert text to unsigned"
         -- </in4-4.18>
     })
 
-test:do_execsql_test(
+test:do_catchsql_test(
     "in4-4.19",
     [[
         SELECT c FROM t4b WHERE +b IN (a);
     ]], {
         -- <in4-4.19>
-        4
+        1, "Type mismatch: can not convert unsigned to text"
         -- </in4-4.19>
     })
 

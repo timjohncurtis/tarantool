@@ -352,7 +352,7 @@ box.execute("SELECT * FROM tboolean WHERE s1 = x'44';")
 box.execute("SELECT * FROM tboolean WHERE s1 = 'abc';")
 ---
 - null
-- 'Type mismatch: can not convert abc to boolean'
+- 'Type mismatch: can not convert text to boolean'
 ...
 box.execute("SELECT * FROM tboolean WHERE s1 = 1;")
 ---
@@ -614,10 +614,11 @@ box.execute("SELECT 18446744073709551615.0 > 18446744073709551615")
   rows:
   - [true]
 ...
-box.execute("SELECT 18446744073709551615 IN ('18446744073709551615', 18446744073709551615.0)")
+box.execute("SELECT 18446744073709551615 IN ('18446744073709551615', 18446744073709551615.0, 1)")
 ---
 - metadata:
-  - name: 18446744073709551615 IN ('18446744073709551615', 18446744073709551615.0)
+  - name: 18446744073709551615 IN ('18446744073709551615', 18446744073709551615.0,
+      1)
     type: boolean
   rows:
   - [true]

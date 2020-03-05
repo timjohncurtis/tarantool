@@ -31,6 +31,7 @@
  * SUCH DAMAGE.
  */
 #include <stdint.h>
+#include <msgpuck.h>
 
 #if defined(__cplusplus)
 extern "C" {
@@ -75,6 +76,14 @@ typedef uint64_t hint_t;
  */
 void
 key_def_set_compare_func(struct key_def *def);
+
+/**
+ * Return an integer less than, equal to, or greater than zero if
+ * mp_class of ltype is found, respectively, to be less than, to
+ * match, or be greater than mp_class of rtype.
+ */
+int
+mp_type_classes_comp(enum mp_type ltype, enum mp_type rtype);
 
 #if defined(__cplusplus)
 } /* extern "C" */
