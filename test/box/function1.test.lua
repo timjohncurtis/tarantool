@@ -269,6 +269,20 @@ box.execute("SELECT \"function1.multireturn\"()")
 box.schema.func.drop("function1.multireturn")
 
 --
+-- gh-4641: box_return_mp() C API to return arbitrary MessagePack
+-- from C functions.
+--
+name = 'function1.test_return_mp'
+box.schema.func.create(name, {language = "C", exports = {'LUA'}})
+box.func[name]:call()
+
+box.schema.user.grant('guest', 'super')
+net:connect(box.cfg.listen):call(name)
+box.schema.user.revoke('guest', 'super')
+
+box.schema.func.drop(name)
+
+--
 -- gh-4182: Introduce persistent Lua functions.
 --
 test_run:cmd("setopt delimiter ';'")
