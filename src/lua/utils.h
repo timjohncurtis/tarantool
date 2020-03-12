@@ -266,12 +266,32 @@ struct luaL_serializer {
 	struct rlist on_update;
 };
 
+/**
+ * An error serialization formats
+ */
+enum error_formats {
+	/** Default(old) format */
+	ERR_FORMAT_DEF,
+	/** Extended format */
+	ERR_FORMAT_EX,
+	/** The max version of error format */
+	ERR_FORMAT_UNK
+};
+
+/**
+ * A serializer context (additional settings for a serializer)
+ */
+struct luaL_serializer_ctx {
+	uint8_t err_format_ver;
+};
+
 extern int luaL_nil_ref;
 extern int luaL_map_metatable_ref;
 extern int luaL_array_metatable_ref;
 
 #define LUAL_SERIALIZER "serializer"
 #define LUAL_SERIALIZE "__serialize"
+#define LUAL_SERIALIZE_EX "__serialize_ex"
 
 struct luaL_serializer *
 luaL_newserializer(struct lua_State *L, const char *modname, const luaL_Reg *reg);
@@ -325,6 +345,7 @@ struct luaL_field {
 	/* subtypes of MP_EXT */
 	enum mp_extension_type ext_type;
 	bool compact;                /* a flag used by YAML serializer */
+	bool use_serialize_ex;
 };
 
 /**
@@ -361,6 +382,7 @@ struct luaL_field {
  *
  * @param L stack
  * @param cfg configuration
+ * @param serializer_ctx the Lua serializer context
  * @param index stack index
  * @param field conversion result
  *
@@ -368,7 +390,8 @@ struct luaL_field {
  * @retval -1 Error.
  */
 int
-luaL_tofield(struct lua_State *L, struct luaL_serializer *cfg, int index,
+luaL_tofield(struct lua_State *L, struct luaL_serializer *cfg,
+	     struct luaL_serializer_ctx *ctx, int index,
 	     struct luaL_field *field);
 
 /**
@@ -407,7 +430,7 @@ static inline void
 luaL_checkfield(struct lua_State *L, struct luaL_serializer *cfg, int idx,
 		struct luaL_field *field)
 {
-	if (luaL_tofield(L, cfg, idx, field) < 0)
+	if (luaL_tofield(L, cfg, NULL, idx, field) < 0)
 		luaT_error(L);
 	if (field->type != MP_EXT || field->ext_type != MP_UNKNOWN_EXTENSION)
 		return;

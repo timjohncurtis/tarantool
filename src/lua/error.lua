@@ -33,6 +33,14 @@ int
 exception_get_int(struct error *e, const struct method_info *method);
 ]]
 
+-- error details
+local error_details = {
+    REASON = 0,
+    CODE = 1,
+    BACKTRACE = 2,
+    CUSTOM_TYPE = 3
+}
+
 local REFLECTION_CACHE = {}
 
 local function reflection_enumerate(err)
@@ -152,6 +160,17 @@ local function error_serialize(err)
     return error_message(err)
 end
 
+local function error_serialize_ex(err)
+    local result = {
+        ["error_magic"] = 13371338,
+        [error_details.CODE] = box.error.error_code(err),
+        [error_details.CUSTOM_TYPE] = error_custom_type(err),
+        [error_details.REASON] = error_message(err),
+        [error_details.BACKTRACE] = error_backtrace(err)
+    }
+    return result
+end
+
 local function error_is_custom(err)
     return ffi.string(err._type.name) == 'CustomError'
 end
@@ -161,7 +180,8 @@ local error_methods = {
     ["raise"] = error_raise,
     ["match"] = error_match, -- Tarantool 1.6 backward compatibility
     ["is_custom"] = error_is_custom,
-    ["__serialize"] = error_serialize
+    ["__serialize"] = error_serialize,
+    ["__serialize_ex"] = error_serialize_ex
 }
 
 local function error_index(err, key)

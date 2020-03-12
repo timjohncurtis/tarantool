@@ -49,6 +49,7 @@
 #include "box/sql_stmt_cache.h"
 #include "session.h"
 #include "rmean.h"
+#include "lua/utils.h"
 
 const char *sql_info_key_strs[] = {
 	"row_count",

@@ -36,6 +36,7 @@
 #include "fiber.h"
 #include "user.h"
 #include "authentication.h"
+#include "lua/utils.h"
 
 #if defined(__cplusplus)
 extern "C" {
@@ -81,20 +82,8 @@ union session_meta {
 };
 
 /**
- * An error transmission formats
- */
-enum error_formats {
-	/** Default(old) format */
-	ERR_FORMAT_DEF,
-	/** Extended format */
-	ERR_FORMAT_EX,
-	/** The max version of error format */
-	ERR_FORMAT_UNK
-};
-
-/**
  * Parameters which may be changed at negotiation phase of session
-*/
+ */
 struct negotiation_params {
 	/** Version of a format for an error transmission */
 	uint8_t err_format_ver;
@@ -132,6 +121,8 @@ struct session {
 	struct trigger fiber_on_stop;
 	/** Negotiation parameters */
 	struct negotiation_params neg_param;
+	/** Session Lua serializer context */
+	struct luaL_serializer_ctx serializer_ctx;
 };
 
 struct session_vtab {

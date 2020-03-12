@@ -37,7 +37,6 @@
 extern "C" {
 #endif /* defined(__cplusplus) */
 
-
 /** \cond public */
 struct error;
 
@@ -61,6 +60,8 @@ luaT_push_nil_and_error(lua_State *L);
 void
 luaT_pusherror(struct lua_State *L, struct error *e);
 /** \endcond public */
+
+extern uint32_t CTID_CONST_STRUCT_ERROR_REF;
 
 struct error *
 luaL_iserror(struct lua_State *L, int narg);

@@ -148,6 +148,9 @@ session_create(enum session_type type)
 	/* Set default negotiation parameters */
 	session->neg_param.err_format_ver = ERR_FORMAT_DEF;
 
+	/* Set default Lua serializer context */
+	session->serializer_ctx.err_format_ver = ERR_FORMAT_DEF;
+
 	/* For on_connect triggers. */
 	credentials_create(&session->credentials, guest_user);
 	struct mh_i64ptr_node_t node;
@@ -383,5 +386,6 @@ session_update_neg_parameters(struct session *session,
 			      const struct negotiation_params *params)
 {
 	session->neg_param.err_format_ver = params->err_format_ver;
+	session->serializer_ctx.err_format_ver = params->err_format_ver;
 	return 0;
 }

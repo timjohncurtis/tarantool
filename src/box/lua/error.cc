@@ -189,6 +189,15 @@ luaT_error_custom_type(lua_State *L)
 }
 
 static int
+luaT_error_code(lua_State *L)
+{
+	struct error *e = luaL_checkerror(L, -1);
+	const uint32_t code = box_error_code(e);
+	lua_pushinteger(L, code);
+	return 1;
+}
+
+static int
 luaT_error_set_lua_bt(lua_State *L)
 {
 	if (lua_gettop(L) < 2)
@@ -336,6 +345,10 @@ box_lua_error_init(struct lua_State *L) {
 		{
 			lua_pushcfunction(L, luaT_error_set_lua_bt);
 			lua_setfield(L, -2, "set_lua_bt");
+		}
+		{
+			lua_pushcfunction(L, luaT_error_code);
+			lua_setfield(L, -2, "error_code");
 		}
 		lua_setfield(L, -2, "__index");
 	}

@@ -36,8 +36,6 @@
 
 #include <string.h>
 
-static int CTID_CONST_STRUCT_ERROR_REF = 0;
-
 /*
  * Memory for the traceback string is obtained with malloc,
  * and can be freed with free.

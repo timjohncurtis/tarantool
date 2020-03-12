@@ -329,6 +329,15 @@ local function create_transport(host, port, user, password, callback,
             return nil, box.error.new({code = self.errno,
                                        reason = self.response})
         elseif not self.id then
+            if type(self.response) == 'table' then
+                for k, v in pairs(self.response) do
+                    if type(v) == 'table' and v['error_magic']
+                        and v['error_magic'] == 13371338 then
+                        local err = parse_extended_error(v)
+                        self.response[k] = err
+                    end
+                end
+            end
             return self.response
         elseif not worker_fiber then
             return nil, box.error.new(E_NO_CONNECTION)
@@ -632,6 +641,7 @@ local function create_transport(host, port, user, password, callback,
             ffi.copy(wpos, body_rpos, body_len)
             body_len = tonumber(body_len)
             if status == IPROTO_OK_KEY then
+                -- tuta interesno
                 request.response = body_len
                 requests[id] = nil
                 request.id = nil

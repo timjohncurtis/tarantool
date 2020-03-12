@@ -136,9 +136,9 @@ port_dump_msgpack(struct port *port, struct obuf *out)
 }
 
 static inline int
-port_dump_msgpack_16(struct port *port, struct obuf *out)
+port_dump_msgpack_16(struct port *port, struct obuf *buf)
 {
-	return port->vtab->dump_msgpack_16(port, out);
+	return port->vtab->dump_msgpack_16(port, buf);
 }
 
 static inline void

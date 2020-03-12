@@ -6,7 +6,7 @@ local tap = require('tap')
 local uri = require('uri')
 
 local test = tap.test('check an extended error')
-test:plan(2)
+test:plan(4)
 
 
 function error_func()
@@ -15,6 +15,12 @@ end
 
 function custom_error_func()
     box.error(box.error.CUSTOM_ERROR, "My Custom Type", "A modern custom error")
+end
+
+function custom_error_func_2()
+    local err = box.error.new(box.error.CUSTOM_ERROR,
+                              "My Custom Type", "A modern custom error")
+    return err
 end
 
 local function version_at_least(peer_version_str, major, minor, patch)
@@ -86,9 +92,11 @@ end
 
 local function test_old_transmission(host, port)
     grant_func('guest', 'error_func')
+    grant_func('guest', 'custom_error_func_2')
 
     local connection = netbox.connect(host, port)
     local _, err = pcall(connection.call, connection, 'error_func')
+    local err_2 = connection:call('custom_error_func_2')
 
     local backtrace_pattern =
     "^stack traceback:\n" ..
@@ -109,15 +117,22 @@ local function test_old_transmission(host, port)
     }
 
     local check_result = check_error(err, check_list)
-    test:ok(check_result, 'Check the old transmission type')
+    local check_result_2 = type(err_2) == 'string'
+        and err_2 == 'User custom error: A modern custom error'
+
+    test:ok(check_result, 'Check the old transmission type(IPROTO_ERROR)')
+    test:ok(check_result_2, 'Check the old transmission type(IPROTO_OK)')
+
     connection:close()
 end
 
 local function test_extended_transmission(host, port)
     grant_func('guest', 'custom_error_func')
+    grant_func('guest', 'custom_error_func_2')
 
     local connection = netbox.connect(host, port, {error_extended = true})
     local _, err = pcall(connection.call, connection, 'custom_error_func')
+    local err_2 = connection:call('custom_error_func_2')
 
     local backtrace_pattern =
     "^Remote%(.+:%d+%):\n" ..
@@ -135,6 +150,21 @@ local function test_extended_transmission(host, port)
     ".*box%-tap/extended_error.test.lua:%d+: in function 'test_extended_transmission'\n" ..
     ".*box%-tap/extended_error.test.lua:%d+: in main chunk$"
 
+    local backtrace_pattern_2 =
+    "^Remote%(.+:%d+%):\n" ..
+    "stack traceback:\n" ..
+    "%s+%[C%]: in function 'new'\n" ..
+    ".*box%-tap/extended_error.test.lua:%d+: in function <.*box%-tap/extended_error.test.lua:%d+>\n" ..
+    "%s+%[C%]: at 0x%w+\n" ..
+    "End Remote\n" ..
+    "stack traceback:\n" ..
+    "%s+builtin/box/net_box.lua:%d+: in function 'parse_extended_error'\n" ..
+    "%s+builtin/box/net_box.lua:%d+: in function 'perform_request'\n" ..
+    "%s+builtin/box/net_box.lua:%d+: in function '_request'\n" ..
+    "%s+builtin/box/net_box.lua:%d+: in function 'call'\n" ..
+    ".*box%-tap/extended_error.test.lua:%d+: in function 'test_extended_transmission'\n" ..
+    ".*box%-tap/extended_error.test.lua:%d+: in main chunk$"
+
     local check_list = {
         type = 'CustomError',
         custom_type = 'My Custom Type',
@@ -144,8 +174,20 @@ local function test_extended_transmission(host, port)
         is_custom = true
     }
 
+    local check_list_2 = {
+        type = 'CustomError',
+        custom_type = 'My Custom Type',
+        message = 'User custom error: A modern custom error',
+        trace = '^File builtin/box/net_box.lua\nLine %d+$',
+        bt = backtrace_pattern_2,
+        is_custom = true
+    }
+
     local check_result = check_error(err, check_list)
-    test:ok(check_result, 'Check the extended transmission type')
+    local check_result_2 = check_error(err_2, check_list_2)
+    test:ok(check_result, 'Check the extended transmission type(IPROTO_ERROR)')
+    test:ok(check_result_2, 'Check the extended transmission type(IPROTO_OK)')
+
     connection:close()
 end
 
@@ -160,6 +202,8 @@ local port = uri.parse(box.cfg.listen).service
 if version_at_least(box.info.version, 2, 4, 1) then
     test_extended_transmission(host, port)
 else
+    test:ok(true, 'Current version of tarantool(' .. tarantool_ver .. ')' ..
+            ' don\'t support extended transmission')
     test:ok(true, 'Current version of tarantool(' .. tarantool_ver .. ')' ..
             ' don\'t support extended transmission')
 end
