@@ -159,6 +159,7 @@ static Keyword aKeywordTable[] = {
   { "SCALAR",                 "TK_SCALAR",      true  },
   { "SELECT",                 "TK_SELECT",      true  },
   { "SET",                    "TK_SET",         true  },
+  { "SETTING",                "TK_SETTING",     false },
   { "SIMPLE",                 "TK_SIMPLE",      true  },
   { "START",                  "TK_START",       true  },
   { "STRING",                 "TK_STRING_KW",   true  },
