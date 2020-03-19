@@ -291,7 +291,7 @@ local function encode(obj)
     return r
 end
 
-local function encode_ibuf(obj, ibuf)
+local function encode_ibuf(obj, ibuf) -- luacheck: ignore XXX
     encode_r(ibuf, obj, 0)
 end
 
@@ -320,7 +320,7 @@ local decode_r
 
 -- See similar constants in utils.cc
 local DBL_INT_MAX = 1e14 - 1
-local DBL_INT_MIN = -1e14 + 1
+local DBL_INT_MIN = -1e14 + 1 -- luacheck: ignore 211
 
 local function decode_u8(data)
     local num = ffi.cast(uint8_ptr_t, data[0])[0]
@@ -465,8 +465,7 @@ end
 local function decode_array(data, size)
     assert (type(size) == "number")
     local arr = {}
-    local i
-    for i=1,size,1 do
+    for i=1,size,1 do -- luacheck: ignore 213
         table.insert(arr, decode_r(data))
     end
     if not msgpack.cfg.decode_save_metatables then
@@ -478,8 +477,7 @@ end
 local function decode_map(data, size)
     assert (type(size) == "number")
     local map = {}
-    local i
-    for i=1,size,1 do
+    for i=1,size,1 do -- luacheck: ignore 213
         local key = decode_r(data);
         local val = decode_r(data);
         map[key] = val
@@ -492,7 +490,7 @@ end
 
 local ext_decoder = {
     -- MP_UNKNOWN_EXTENSION
-    [0] = function(data, len) error("unsupported extension type") end,
+    [0] = function() error("unsupported extension type") end,
     -- MP_DECIMAL
     [1] = function(data, len) local num = ffi.new("decimal_t") builtin.decimal_unpack(data, len, num) return num end,
 }
@@ -502,7 +500,6 @@ local function decode_ext(data)
     -- mp_decode_extl and mp_decode_decimal
     -- need type code
     data[0] = data[0] - 1
-    local old_data = data[0]
     local len = builtin.mp_decode_extl(data, t)
     local fun = ext_decoder[t[0]]
     if type(fun) == 'function' then
@@ -589,7 +586,7 @@ local function check_offset(offset, len)
     if offset == nil then
         return 1
     end
-    local offset = ffi.cast('ptrdiff_t', offset)
+    offset = ffi.cast('ptrdiff_t', offset)
     if offset < 1 or offset > len then
         error(string.format("offset = %d is out of bounds [1..%d]",
             tonumber(offset), len))
