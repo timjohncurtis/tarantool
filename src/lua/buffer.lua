@@ -193,7 +193,7 @@ local ibuf_mt = {
 
 ffi.metatype(ibuf_t, ibuf_mt);
 
-local function ibuf_new(arg, arg2)
+local function ibuf_new(arg)
     local buf = ffi.new(ibuf_t)
     local slabc = builtin.tarantool_lua_slab_cache()
     builtin.ibuf_create(buf, slabc, READAHEAD)
