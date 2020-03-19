@@ -28,7 +28,7 @@ os.environ = function()
 end
 
 os.setenv = function(key, value)
-    local rv = nil --ignore 542
+    local rv = nil -- luacheck: ignore 311
     if value ~= nil then
         rv = ffi.C.setenv(key, value, 1)
     else

@@ -306,7 +306,7 @@ fio.abspath = function(path)
         error("Usage: fio.abspath(path)")
     end
     path = path
-    local joined_path = '' --ignore 542
+    local joined_path = '' -- luacheck: ignore 311
     local path_tab = {}
     if string.sub(path, 1, 1) == '/' then
         joined_path = path
@@ -355,7 +355,7 @@ fio.mktree = function(path, mode)
     end
     path = fio.abspath(path)
 
-    local path = string.gsub(path, '^/', '')
+    path = string.gsub(path, '^/', '')
     local dirs = string.split(path, "/")
 
     local current_dir = "/"
@@ -384,7 +384,7 @@ fio.rmtree = function(path)
     if type(path) ~= 'string' then
         error("Usage: fio.rmtree(path)")
     end
-    local status
+    local status -- luacheck: ignore 231
     path = fio.abspath(path)
     local ls, err = fio.listdir(path)
     if err ~= nil then
@@ -395,7 +395,7 @@ fio.rmtree = function(path)
         local st = fio.lstat(tmppath)
         if st then
             if st:is_dir() then
-                st, err = fio.rmtree(tmppath)
+                _, err = fio.rmtree(tmppath)
             else
                 _, err = fio.unlink(tmppath)
             end
@@ -430,7 +430,6 @@ fio.copytree = function(from, to)
     if type(from) ~= 'string' or type(to) ~= 'string' then
         error('Usage: fio.copytree(from, to)')
     end
-    local reason
     local st = fio.stat(from)
     if not st then
         return false, string.format("Directory %s does not exist", from)
@@ -444,14 +443,14 @@ fio.copytree = function(from, to)
     end
 
     -- create tree of destination
-    status, reason = fio.mktree(to)
+    local status, reason = fio.mktree(to) -- luacheck: ignore 231
     if reason ~= nil then
         return false, reason
     end
     for _, f in ipairs(ls) do
         local ffrom = fio.pathjoin(from, f)
         local fto = fio.pathjoin(to, f)
-        local st = fio.lstat(ffrom)
+        st = fio.lstat(ffrom)
         if st and st:is_dir() then
             status, reason = fio.copytree(ffrom, fto)
             if reason ~= nil then
@@ -465,7 +464,8 @@ fio.copytree = function(from, to)
             end
         end
         if st:is_link() then
-            local link_to, reason = fio.readlink(ffrom)
+            local link_to
+            link_to, reason = fio.readlink(ffrom)
             if reason ~= nil then
                 return false, reason
             end

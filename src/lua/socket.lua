@@ -172,7 +172,7 @@ local function get_iflags(table, flags)
     if type(flags) ~= 'table' then
         flags = { flags }
     end
-    for i, f in pairs(flags) do
+    for _, f in pairs(flags) do
         if table[f] == nil then
             return nil
         end
@@ -660,7 +660,7 @@ local function check_delimiter(self, limit, eols)
     end
 
     local shortest
-    for i, eol in ipairs(eols) do
+    for _, eol in ipairs(eols) do
         local data = ffi.C.memmem(rbuf.rpos, rbuf:size(), eol, #eol)
         if data ~= nil then
             local len = ffi.cast('char *', data) - rbuf.rpos + #eol
@@ -1047,7 +1047,7 @@ local function tcp_connect(host, port, timeout)
         boxerrno(boxerrno.EINVAL)
         return nil
     end
-    for i, remote in pairs(dns) do
+    for _, remote in pairs(dns) do
         timeout = stop - fiber.clock()
         if timeout <= 0 then
             boxerrno(boxerrno.ETIMEDOUT)

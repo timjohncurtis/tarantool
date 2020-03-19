@@ -145,7 +145,7 @@ local function parameters_parse(t_in, options)
                 if parameter_has_value(lookup[command]) then
                     -- in case next argument is value of this key (not --arg)
                     local next_arg = t_in[i + 1]
-                    local is_long, is_short, is_dash = parse_param_prefix(next_arg)
+                    is_long, is_short, is_dash = parse_param_prefix(next_arg)
                     if is_dash then
                         skip_param = true
                     elseif is_long == false and not is_short and not is_dash then
