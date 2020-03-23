@@ -199,7 +199,11 @@ void
 say_set_log_format(enum say_format format)
 {
 	log_format_func_t format_func;
-
+	bool allowed_to_change = log_default->type == SAY_LOGGER_STDERR ||
+			         log_default->type == SAY_LOGGER_PIPE ||
+				 log_default->type == SAY_LOGGER_FILE;
+	if (!allowed_to_change)
+		return;
 	switch (format) {
 	case SF_JSON:
 		assert(log_default->type != SAY_LOGGER_SYSLOG);
