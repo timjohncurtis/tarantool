@@ -349,6 +349,84 @@ vclock_compare_ignore0(const struct vclock *a, const struct vclock *b)
 }
 
 /**
+ * Compare vclocks lexicographically.
+ * The following affirmation holds: if a < b in terms of
+ * vclock_compare, then a < b in terms of vclock_lex_compare.
+ * However, a < b in terms of vclock_lex_compare doesn't mean
+ * than a < b in terms of vclock_compare. Example:
+ * {1:5, 2:10} < {1:7, 2:3} (vclock_lex_compare), but the vclocks
+ * are incomparable in terms of vclock_compare.
+ * All vclocks are comparable lexicographically.
+ *
+ * \param a vclock
+ * \param b vclock
+ * \retval 1 if \a a is lexicographically greater than \a b
+ * \retval -1 if \a a is lexicographically less than \a b
+ * \retval 0 if vclocks are equal
+ */
+static inline int
+vclock_lex_compare(const struct vclock *a, const struct vclock *b)
+{
+	vclock_map_t map = a->map | b->map;
+	struct bit_iterator it;
+	bit_iterator_init(&it, &map, sizeof(map), true);
+	for(size_t replica_id = bit_iterator_next(&it); replica_id < VCLOCK_MAX;
+	    replica_id = bit_iterator_next(&it)) {
+		int64_t lsn_a = vclock_get(a, replica_id);
+		int64_t lsn_b = vclock_get(b, replica_id);
+		if (lsn_a < lsn_b) return -1;
+		if (lsn_a > lsn_b) return 1;
+	}
+	return 0;
+}
+
+/**
+ * Return a vclock, which is a componentwise minimum between
+ * vclocks \a a and \a b.
+ *
+ * \param[in,out] a vclock containing the minimum components.
+ * \param b vclock to compare with.
+ * \param ignore_zero whether to ignore 0th vclock component
+ *                    or not.
+ */
+static inline void
+vclock_min_generic(struct vclock *a, const struct vclock *b, bool ignore_zero)
+{
+	vclock_map_t map = a->map | b->map;
+	struct bit_iterator it;
+	bit_iterator_init(&it, &map, sizeof(map), true);
+	size_t replica_id = bit_iterator_next(&it);
+	if (replica_id == 0 && ignore_zero)
+		replica_id = bit_iterator_next(&it);
+
+	for( ; replica_id < VCLOCK_MAX; replica_id = bit_iterator_next(&it)) {
+		int64_t lsn_a = vclock_get(a, replica_id);
+		int64_t lsn_b = vclock_get(b, replica_id);
+		if (lsn_a <= lsn_b)
+			continue;
+		vclock_reset(a, replica_id, lsn_b);
+	}
+}
+
+/**
+ * \sa vclock_min_generic
+ */
+static inline void
+vclock_min(struct vclock *a, const struct vclock *b)
+{
+	return vclock_min_generic(a, b, false);
+}
+
+/**
+ * \sa vclock_min_generic
+ */
+static inline void
+vclock_min_ignore0(struct vclock *a, const struct vclock *b)
+{
+	return vclock_min_generic(a, b, true);
+}
+
+/**
  * @brief vclockset - a set of vclocks
  */
 typedef rb_tree(struct vclock) vclockset_t;
