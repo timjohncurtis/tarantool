@@ -322,9 +322,14 @@ getaddrinfo_cb(struct coio_task *ptr)
 {
 	struct async_getaddrinfo_task *task =
 		(struct async_getaddrinfo_task *) ptr;
-
-	task->rc = getaddrinfo(task->host, task->port, &task->hints,
-			     &task->result);
+	struct gaicb host;
+	host.ar_name = task->host;
+	host.ar_service = task->port;
+	host.ar_request = &task->hints;
+	host.ar_result = task->result;
+	struct gaicb *host_list = &host;
+	task->rc = getaddrinfo_a(GAI_WAIT, &host_list, 1, NULL);
+	task->result = host.ar_result;
 
 	/* getaddrinfo can return EAI_ADDRFAMILY on attempt
 	 * to resolve ::1, if machine has no public ipv6 addresses
@@ -335,8 +340,9 @@ getaddrinfo_cb(struct coio_task *ptr)
 	if ((task->rc == EAI_BADFLAGS || task->rc == EAI_ADDRFAMILY) &&
 	    (task->hints.ai_flags & AI_ADDRCONFIG)) {
 		task->hints.ai_flags &= ~AI_ADDRCONFIG;
-		task->rc = getaddrinfo(task->host, task->port, &task->hints,
-			     &task->result);
+		host.ar_request = &task->hints;
+		task->rc = getaddrinfo_a(GAI_WAIT, &host_list, 1, NULL);
+		task->result = host.ar_result;
 	}
 	return 0;
 }
