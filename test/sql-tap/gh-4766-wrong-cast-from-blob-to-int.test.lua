@@ -1,6 +1,6 @@
 #!/usr/bin/env tarantool
 test = require("sqltester")
-test:plan(12)
+test:plan(15)
 
 --
 -- Make sure that STRING or BLOB that contains DOUBLE value cannot
@@ -105,6 +105,46 @@ test:do_catchsql_test(
         INSERT INTO t VALUES (x'322e');
     ]], {
         1, "Type mismatch: can not convert varbinary to integer"
+    })
+
+--
+-- Make sure that a blob as part of a tuple can be cast to NUMBER,
+-- INTEGER and UNSIGNED. Prior to this patch, an error could
+-- appear due to the absence of '\0' at the end of the BLOB.
+--
+test:do_execsql_test(
+    "gh-4766-13",
+    [[
+        CREATE TABLE t1 (a VARBINARY PRIMARY KEY);
+        INSERT INTO t1 VALUES (X'33'), (X'372020202020');
+        SELECT a, CAST(a AS NUMBER), CAST(a AS INTEGER), CAST(a AS UNSIGNED) FROM t1;
+    ]], {
+        '3', 3, 3, 3, '7     ', 7, 7, 7
+    })
+
+--
+-- Make sure that BLOB longer than 12287 bytes cannot be cast to
+-- INTEGER.
+--
+long_str = string.rep('0', 12284)
+test:do_execsql_test(
+    "gh-4766-14",
+    "SELECT CAST('" .. long_str .. "123'" .. " AS INTEGER);", {
+        123
+    })
+
+
+test:do_catchsql_test(
+    "gh-4766-15",
+    "SELECT CAST('" .. long_str .. "1234'" .. " AS INTEGER);", {
+        1, "Type mismatch: can not convert 000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "0000000000000000000000000000000000000000000000000000000000000000000" ..
+        "000000000000000000000000000000000000000000000"
     })
 
 test:finish_test()
