@@ -15,7 +15,9 @@ index = space:create_index('primary', { type = 'hash' })
 ekeys = {}
 evals = {}
 for k, v in pairs(errinj.info()) do \
-    table.insert(ekeys, k)          \
+    if not (k == "ERRINJ_AUTO_UPGRADE") then  \
+        table.insert(ekeys, k)          \
+    end \
 end
 table.sort(ekeys)
 for i, k in ipairs(ekeys) do         \

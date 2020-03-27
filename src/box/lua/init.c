@@ -34,6 +34,8 @@
 #include <lauxlib.h>
 #include <lualib.h>
 
+#include "errinj.h"
+
 #include "lua/utils.h" /* luaT_error() */
 #include "lua/trigger.h"
 

@@ -29,7 +29,9 @@ evals = {}
 ---
 ...
 for k, v in pairs(errinj.info()) do \
-    table.insert(ekeys, k)          \
+    if not (k == "ERRINJ_AUTO_UPGRADE") then  \
+        table.insert(ekeys, k)          \
+    end \
 end
 ---
 ...
