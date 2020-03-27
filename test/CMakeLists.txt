@@ -59,6 +59,7 @@ add_subdirectory(app)
 add_subdirectory(app-tap)
 add_subdirectory(box)
 add_subdirectory(unit)
+add_subdirectory(luajit-tap/gh-4427-ffi-sandwich)
 
 # Move tarantoolctl config
 if (NOT ${PROJECT_BINARY_DIR} STREQUAL ${PROJECT_SOURCE_DIR})
