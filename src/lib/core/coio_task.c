@@ -37,6 +37,7 @@
 #include <unistd.h>
 #include <netdb.h>
 #include <sys/socket.h>
+#include <c-ares/ares.h>
 
 #include "fiber.h"
 #include "third_party/tarantool_ev.h"
@@ -313,6 +314,30 @@ struct async_getaddrinfo_task {
 #define EAI_ADDRFAMILY EAI_BADFLAGS /* EAI_ADDRFAMILY is deprecated on BSD */
 #endif
 
+static void getaddrinfo_result_cb(void *data, int status, int timeouts,
+				  struct ares_addrinfo *ai)
+{
+	(void)timeouts;
+	struct async_getaddrinfo_task *task =
+		(struct async_getaddrinfo_task *) data;
+	task->rc = status;
+	if (status != ARES_SUCCESS)
+		return;
+	task->result = calloc(1, sizeof(struct addrinfo));
+
+	task->result->ai_addr = ai->nodes->ai_addr;
+	task->result->ai_protocol = ai->nodes->ai_protocol;
+	task->result->ai_socktype = ai->nodes->ai_socktype;
+	task->result->ai_family = ai->nodes->ai_family;
+	task->result->ai_flags = ai->nodes->ai_flags;
+	task->result->ai_addrlen = ai->nodes->ai_addrlen;
+	task->result->ai_next = NULL;
+
+	task->result->ai_protocol = task->result->ai_protocol ? task->result->ai_protocol : task->hints.ai_protocol;
+	task->result->ai_socktype = task->result->ai_socktype ? task->result->ai_socktype : task->hints.ai_socktype;
+	task->result->ai_family = task->result->ai_family ? task->result->ai_family : task->hints.ai_family;
+}
+
 /*
  * Resolver function, run in separate thread by
  * coio (libeio).
@@ -323,8 +348,27 @@ getaddrinfo_cb(struct coio_task *ptr)
 	struct async_getaddrinfo_task *task =
 		(struct async_getaddrinfo_task *) ptr;
 
-	task->rc = getaddrinfo(task->host, task->port, &task->hints,
-			     &task->result);
+	ares_channel channel;
+	ares_init(&channel);
+	struct ares_addrinfo_hints hints;
+	hints.ai_flags = 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_PASSIVE ? ARES_AI_PASSIVE : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_CANONNAME ? ARES_AI_CANONNAME : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_NUMERICHOST ? ARES_AI_NUMERICHOST : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_V4MAPPED ? ARES_AI_V4MAPPED : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_ALL ? ARES_AI_ALL : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_ADDRCONFIG ? ARES_AI_ADDRCONFIG : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_IDN ? ARES_AI_IDN : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_CANONIDN ? ARES_AI_CANONIDN : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_IDN_ALLOW_UNASSIGNED ? ARES_AI_IDN_ALLOW_UNASSIGNED : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_IDN_USE_STD3_ASCII_RULES ? ARES_AI_IDN_USE_STD3_ASCII_RULES : 0;
+	hints.ai_flags |= task->hints.ai_flags & AI_NUMERICSERV ? ARES_AI_NUMERICSERV : 0;
+	hints.ai_family = task->hints.ai_family;
+	hints.ai_socktype = task->hints.ai_socktype;
+	hints.ai_protocol = task->hints.ai_protocol;
+	const char *host = task->host ? task->host : "127.0.0.1";
+
+	ares_getaddrinfo(channel, host, task->port, &hints, getaddrinfo_result_cb, task);
 
 	/* getaddrinfo can return EAI_ADDRFAMILY on attempt
 	 * to resolve ::1, if machine has no public ipv6 addresses
@@ -332,11 +376,11 @@ getaddrinfo_cb(struct coio_task *ptr)
 	 *
 	 * See for details: https://bugs.launchpad.net/tarantool/+bug/1160877
 	 */
-	if ((task->rc == EAI_BADFLAGS || task->rc == EAI_ADDRFAMILY) &&
+	if ((task->rc == ARES_EBADFLAGS || task->rc == ARES_EBADFAMILY) &&
 	    (task->hints.ai_flags & AI_ADDRCONFIG)) {
+		hints.ai_flags &= ~ARES_AI_ADDRCONFIG;
 		task->hints.ai_flags &= ~AI_ADDRCONFIG;
-		task->rc = getaddrinfo(task->host, task->port, &task->hints,
-			     &task->result);
+		ares_getaddrinfo(NULL, host, task->port, &hints, getaddrinfo_result_cb, task);
 	}
 	return 0;
 }
@@ -351,7 +395,7 @@ getaddrinfo_free_cb(struct coio_task *ptr)
 	if (task->port != NULL)
 		free(task->port);
 	if (task->result != NULL)
-		freeaddrinfo(task->result);
+		free(task->result);
 	coio_task_destroy(&task->base);
 	TRASH(task);
 	free(task);
