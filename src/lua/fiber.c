@@ -38,6 +38,7 @@
 #include <lua.h>
 #include <lauxlib.h>
 #include <lualib.h>
+#include <luajit.h>
 
 void
 luaL_testcancel(struct lua_State *L)
@@ -454,6 +455,25 @@ lua_fiber_run_f(MAYBE_UNUSED va_list ap)
 	return result;
 }
 
+static int
+fiber_on_yield(struct trigger *trigger, void *event)
+{
+	(void) trigger;
+	(void) event;
+
+	/*
+	 * XXX: According to LuaJIT API reference luaJIT_setmode
+	 * function returns 0 on failure and 1 on success. Since
+	 * this call is aimed to abort the trace recording on
+	 * fiber_yield call and prevent already compiled traces
+	 * execution, the mode parameter is an invalid value (-1)
+	 * so JIT mode change is expected to fail and 0 is
+	 * returned. Otherwise non-zero return value signals
+	 * trigger_run routine about this trigger failure.
+	 */
+	return luaJIT_setmode(tarantool_L, 0, -1);
+}
+
 /**
  * Utility function for fiber.create and fiber.new
  */
@@ -467,9 +487,17 @@ fiber_create(struct lua_State *L)
 
 	struct fiber *f = fiber_new("lua", lua_fiber_run_f);
 	if (f == NULL) {
-		luaL_unref(L, LUA_REGISTRYINDEX, coro_ref);
-		luaT_error(L);
+		/* diagnostics is set in fiber_new. */
+		goto error;
 	}
+
+	struct trigger *t = malloc(sizeof(*t));
+	if (t == NULL) {
+		diag_set(OutOfMemory, sizeof(*t), "malloc", "t");
+		goto error;
+	}
+	trigger_create(t, fiber_on_yield, NULL, (trigger_f0) free);
+	trigger_add(&f->on_yield, t);
 
 	/* Move the arguments to the new coro */
 	lua_xmove(L, child_L, lua_gettop(L));
@@ -483,6 +511,13 @@ fiber_create(struct lua_State *L)
 	lua_pushinteger(child_L, coro_ref);
 	f->storage.lua.stack = child_L;
 	return f;
+
+error:
+	/* Release the anchored coroutine. */
+	luaL_unref(L, LUA_REGISTRYINDEX, coro_ref);
+	luaT_error(L);
+	unreachable();
+	return NULL;
 }
 
 /**
