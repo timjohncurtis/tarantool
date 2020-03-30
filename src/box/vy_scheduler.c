@@ -687,17 +687,13 @@ vy_scheduler_begin_checkpoint(struct vy_scheduler *scheduler)
 	assert(!scheduler->checkpoint_in_progress);
 
 	/*
-	 * If the scheduler is throttled due to errors, do not wait
-	 * until it wakes up as it may take quite a while. Instead
-	 * fail checkpoint immediately with the last error seen by
-	 * the scheduler.
+	 * It makes no sense throttling checkpoint process since
+	 * it can be either ran manually or due to timeout. At this
+	 * point let's ignore it.
 	 */
 	if (scheduler->is_throttled) {
-		struct error *e = diag_last_error(&scheduler->diag);
-		diag_add_error(diag_get(), e);
-		say_error("cannot checkpoint vinyl, "
-			  "scheduler is throttled with: %s", e->errmsg);
-		return -1;
+		say_info("scheduler is unthrottled due to checkpoint process");
+		scheduler->is_throttled = false;
 	}
 
 	if (!vy_scheduler_dump_in_progress(scheduler)) {

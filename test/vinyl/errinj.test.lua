@@ -38,7 +38,7 @@ num_rows = num_rows + range();
 -- fails due to error injection
 box.snapshot();
 errinj.set("ERRINJ_VY_RUN_WRITE", false);
--- fails due to scheduler timeout
+-- does not fail once error is unset
 box.snapshot();
 fiber.sleep(0.06);
 num_rows = num_rows + range();
@@ -127,8 +127,6 @@ _ = s:replace({2, string.rep('b', 128000)})
 box.snapshot();
 #s:select({1})
 s:drop()
-
-errinj.set("ERRINJ_VY_SCHED_TIMEOUT", 0)
 
 --
 -- Check that upsert squash fiber does not crash if index or
@@ -384,7 +382,6 @@ s.index.pk:stat().disk.compaction.count -- 0
 errinj.set("ERRINJ_WAL_IO", false)
 while s.index.pk:stat().disk.compaction.count == 0 do fiber.sleep(0.001) end
 s.index.pk:stat().disk.compaction.count -- 1
-errinj.set("ERRINJ_VY_SCHED_TIMEOUT", 0)
 
 box.snapshot() -- ok
 s:drop()

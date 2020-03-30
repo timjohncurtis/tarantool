@@ -78,10 +78,10 @@ errinj.set("ERRINJ_VY_RUN_WRITE", false);
 ---
 - ok
 ...
--- fails due to scheduler timeout
+-- does not fail once error is unset
 box.snapshot();
 ---
-- error: Error injection 'vinyl dump'
+- ok
 ...
 fiber.sleep(0.06);
 ---
@@ -365,10 +365,6 @@ box.snapshot();
 ...
 s:drop()
 ---
-...
-errinj.set("ERRINJ_VY_SCHED_TIMEOUT", 0)
----
-- ok
 ...
 --
 -- Check that upsert squash fiber does not crash if index or
@@ -1055,10 +1051,6 @@ while s.index.pk:stat().disk.compaction.count == 0 do fiber.sleep(0.001) end
 s.index.pk:stat().disk.compaction.count -- 1
 ---
 - 1
-...
-errinj.set("ERRINJ_VY_SCHED_TIMEOUT", 0)
----
-- ok
 ...
 box.snapshot() -- ok
 ---
