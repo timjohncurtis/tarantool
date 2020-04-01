@@ -213,4 +213,12 @@ box.error.set(e1)
 box.error.clear()
 assert(e1.prev == e2)
 
+-- gh-4829: always promote error created via box.error() to
+-- diagnostic area.
+e1 = box.error.new({code = 111, reason = "cause"})
+box.error({code = 111, reason = "err"})
+box.error.last()
+box.error(e1)
+assert(box.error.last() == e1)
+
 space:drop()
