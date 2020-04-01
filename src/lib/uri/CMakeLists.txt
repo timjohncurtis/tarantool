@@ -9,10 +9,12 @@ if (CC_HAS_WNO_IMPLICIT_FALLTHROUGH)
 endif()
 add_library(uri STATIC uri.c)
 
-set(TEST "test_uri")
-add_executable(${TEST} ${TEST}.c)
-set_target_properties(${TEST}
-        PROPERTIES
-        COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
-        LINK_FLAGS "-fsanitize=fuzzer")
-target_link_libraries(${TEST} PRIVATE uri)
+if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+    set(TEST "test_uri")
+    add_executable(${TEST} ${TEST}.c)
+    set_target_properties(${TEST}
+            PROPERTIES
+            COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
+            LINK_FLAGS "-fsanitize=fuzzer")
+    target_link_libraries(${TEST} PRIVATE uri)
+end(CMAKE_CXX_COMPILER_ID)
