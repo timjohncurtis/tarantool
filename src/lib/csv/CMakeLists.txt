@@ -7,9 +7,8 @@ add_library(csv STATIC ${lib_sources})
 
 set(TEST "test_csv")
 add_executable(${TEST} ${TEST}.c)
-target_compile_options(${TEST}
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
-            )
-target_link_libraries(${TEST}
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
-            csv)
+set_target_properties(${TEST}
+        PROPERTIES
+        COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
+        LINK_FLAGS "-fsanitize=fuzzer")
+target_link_libraries(${TEST} PRIVATE csv)

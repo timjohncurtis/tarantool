@@ -8,9 +8,8 @@ target_link_libraries(json misc)
 
 set(TEST "test_json")
 add_executable(${TEST} ${TEST}.c)
-target_compile_options(${TEST}
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
-            )
-target_link_libraries(${TEST}
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
-            json misc)
+set_target_properties(${TEST}
+        PROPERTIES
+        COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
+        LINK_FLAGS "-fsanitize=fuzzer")
+target_link_libraries(${TEST} PRIVATE json misc)

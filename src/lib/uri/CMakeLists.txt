@@ -9,10 +9,10 @@ if (CC_HAS_WNO_IMPLICIT_FALLTHROUGH)
 endif()
 add_library(uri STATIC uri.c)
 
-add_executable(test_uri test_uri.c)
-target_compile_options(test_uri
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-g -O1 -fsanitize=fuzzer>
-            )
-target_link_libraries(test_uri
-            PRIVATE $<$<C_COMPILER_ID:Clang>:-fsanitize=fuzzer>
-            uri)
+set(TEST "test_uri")
+add_executable(${TEST} ${TEST}.c)
+set_target_properties(${TEST}
+        PROPERTIES
+        COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
+        LINK_FLAGS "-fsanitize=fuzzer")
+target_link_libraries(${TEST} PRIVATE uri)
