@@ -13,4 +13,4 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
             COMPILE_FLAGS "-fsanitize=fuzzer -g -O1"
             LINK_FLAGS "-fsanitize=fuzzer")
     target_link_libraries(${TEST} PRIVATE csv)
-end(CMAKE_CXX_COMPILER_ID)
+endif (CMAKE_CXX_COMPILER_ID)
